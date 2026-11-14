@@ -1,0 +1,5 @@
+# Optional build inputs of the Craft apps (fonts, translations, proofing data). Pinned by the
+# submodules in vendor/; see docs/decisions.md "Build inputs".
+[env]
+CRAFT_FONTS_DIR = { value = "vendor/craft-fonts", relative = true }
+CRAFT_I18N_DIR = { value = "vendor/craft-i18n", relative = true }

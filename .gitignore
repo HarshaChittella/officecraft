@@ -1,0 +1,5 @@
+/target/
+/plan/
+/macos/build/
+*.xcframework
+.DS_Store

@@ -1,0 +1,21 @@
+[package]
+name = "craftworks-core"
+description = "Editor trait, tab model, routing and project model for Craftworks."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+wordcraft-ui-egui.workspace = true
+wordcraft-engine.workspace = true
+gridcraft-ui-egui.workspace = true
+gridcraft-engine.workspace = true
+deckcraft-ui-egui.workspace = true
+deckcraft-engine.workspace = true
+pdfcraft-ui-egui.workspace = true
+pdfcraft-engine.workspace = true
+
+[lints]
+workspace = true

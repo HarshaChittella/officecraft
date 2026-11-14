@@ -1,0 +1,18 @@
+[submodule "vendor/wordcraft"]
+	path = vendor/wordcraft
+	url = https://github.com/HarshaChittella/wordcraft.git
+[submodule "vendor/gridcraft"]
+	path = vendor/gridcraft
+	url = https://github.com/HarshaChittella/gridcraft.git
+[submodule "vendor/deckcraft"]
+	path = vendor/deckcraft
+	url = https://github.com/HarshaChittella/deckcraft.git
+[submodule "vendor/pdfcraft"]
+	path = vendor/pdfcraft
+	url = https://github.com/HarshaChittella/pdfcraft.git
+[submodule "vendor/craft-fonts"]
+	path = vendor/craft-fonts
+	url = https://github.com/storytold/craft-fonts.git
+[submodule "vendor/craft-i18n"]
+	path = vendor/craft-i18n
+	url = https://github.com/storytold/craft-i18n.git
