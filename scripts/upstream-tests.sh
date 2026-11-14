@@ -44,15 +44,15 @@ repos=("$@")
 status=0
 for repo in "${repos[@]}"; do
   dir="$root/vendor/$repo"
-  log="$logs/upstream-test-$repo${CW_ALIGN:+-aligned}.log"
+  log="$logs/upstream-test-$repo${CW_ALIGN:+-aligned}-$(date +%Y%m%d-%H%M%S).log"
   echo "== $repo → $log"
   (
     cd "$dir" || exit 1
     export CRAFT_FONTS_DIR="$root/vendor/craft-fonts"
-    export CRAFT_I18N_DIR="$root/vendor/craft-i18n"
+    export CRAFT_I18N_DIR="${CW_I18N_DIR:-$root/vendor/craft-i18n}"
     export CARGO_TARGET_DIR="$target_root/$repo${CW_ALIGN:+-aligned}"
     # shellcheck disable=SC2086
-    cargo test "${overrides[@]}" ${CW_TEST_ARGS:---workspace} --no-fail-fast
+    cargo test "${overrides[@]}" --no-fail-fast ${CW_TEST_ARGS:---workspace}
   ) >"$log" 2>&1
   rc=$?
   git -C "$dir" checkout -q -- Cargo.lock 2>/dev/null

@@ -116,10 +116,62 @@ H7 and the PdfCraft live backend are the final task in Phase 7, after the Word, 
 - The forks of the four repos go under the owner's GitHub account.
 - Submodules track upstream `storytold/*`; each fork is added as a second remote named `fork` for the patch branches.
 
-## Duplicate crates (`cargo tree -d`)
+## D16 craft-libs: one revision, `e2dc681`, for every app. PROVISIONAL 2026-11-14
 
-To be filled in Phase 0 (task 0.8).
+- Before: 9 craft-libs revisions in the graph (`92d392c`, `762a06a`, `01315d9`, `6e03f65`, `aa84415`, `bb57d42`, `63196e6`, `75c70fa`, `e2dc681`). They lie on one line of history, and `e2dc681` (PdfCraft's pin, 2026-11-13) contains all of them.
+- Change: `vendor/craft-libs` is a submodule at `e2dc681`. Root `[patch."https://github.com/storytold/craft-libs"]` points all 37 craft-libs crates at it. `krilla` stays on the brief's `6e03f65` through the crates-io patch.
+- `cargo check` passes. craft-libs duplicates drop to 0, and lockfile packages go from 942 to 926.
+- **Kept only if** every app's own suite passes with it: `CW_ALIGN=1 scripts/upstream-tests.sh`. Results are under "Upstream test results".
 
-## Pinned SHAs
+## D17 Build inputs. PROVISIONAL 2026-11-14
 
-To be filled in Phase 0 (task 0.2). Read on 2026-11-14: wordcraft `514085c`, gridcraft `c0ee120`, deckcraft `69379cf`, pdfcraft `e98dc17`.
+- `CRAFT_FONTS_DIR` → `vendor/craft-fonts` at `c1db6d1` (HEAD). No app pins craft-fonts.
+- `CRAFT_I18N_DIR` → `vendor/craft-i18n` at `1e51542` (WordCraft's pin). It is 57 commits ahead of PdfCraft's `575cfde` and contains it. One cargo build can only point at one copy.
+- **Known cost:** 2 PdfCraft UI tests fail on `1e51542` and pass on `575cfde`:
+  - `fonts::primary_ui_fonts_cover_latin_and_cyrillic_catalogs`: the French catalog now uses `▸`, which Inter lacks.
+  - `comments::hotbar_picker_searches_translated_tool_labels`: the label "Hotbar settings" changed.
+- In the app, that means a missing-glyph box in French PDF menus, plus one label that differs from PdfCraft's tests. The choice between the two revisions waits for WordCraft's results on `575cfde`. If WordCraft passes on the older one, we use the older one.
+
+## Upstream test results (task 0.6)
+
+Runs on 2026-11-14. Every run is logged under `plan/logs/` (gitignored), one timestamped file per run.
+
+### PdfCraft (egui `725a39f` is already its own pin; our run changes `krilla` and the craft-i18n checkout)
+
+**9,640 passed, 19 failed.** None of the 19 is caused by egui or krilla.
+
+| Tests | Count | Cause | Evidence |
+|---|---|---|---|
+| xattr-preserving saves: `staging::*` ×4, `macos_association::*` ×3, `file_watch::*` ×2, `editing::a_save_preserves…`, `automation::saving_a_pdf_keeps…`, `signing::signing_preserves…` | 12 | `could not preserve the file's extended attributes … Result too large (os error 34)` on **macOS 27.2**. | 11 of the 12 also fail on PdfCraft's unmodified pins, both inside and outside the tool sandbox. `signing::…` has the same cause but was not re-run. `pdfcraft-platform` does not depend on egui. To report upstream (asking first). |
+| LibreOffice conversion: `office::*` ×2, `libreoffice_converts…`, `open_worker::file_open_converts…`, `engine office_documents…` | 5 | This machine has a stale Homebrew wrapper: `/opt/homebrew/bin/soffice` points at `/Applications/LibreOffice.app`, which is gone, so it exits 126. | All 5 also fail on unmodified pins. Fix: `brew reinstall --cask libreoffice` or `brew uninstall --cask libreoffice`. |
+| `fonts::primary_ui_fonts…`, `comments::hotbar_picker…` | 2 | craft-i18n `1e51542` vs `575cfde` (D17). | Both pass on `575cfde`. |
+
+### WordCraft, GridCraft, DeckCraft (move from egui `6d518fc` to `725a39f`)
+
+Running.
+
+## Duplicate crates (`cargo tree -d`, task 0.9)
+
+With D16, **no craft-libs crate is duplicated**. The rest are third-party crates at different semver versions, which Cargo cannot merge without upstream changes. The list is in `plan/logs/dups-aligned.txt`.
+
+| Crate | Copies | Why it cannot merge |
+|---|---|---|
+| `read-fonts` | 4 | skrifa and harfrust generations differ across the apps' font stacks |
+| `skrifa` | 3 | same as `read-fonts` |
+| `phf`, `phf_shared`, `phf_generator`, `phf_macros` | 3 each | 0.11/0.12/0.13 from different parsers |
+| `getrandom` | 3 | 0.2/0.3/0.4 from rand generations |
+| `vello_cpu`, `vello_common` | 2 each | 0.0.8 is PdfCraft's vendored renderer (hayro); 0.2 is DeckCraft's renderer. Intended |
+| `objc2`, `objc2-app-kit`, `objc2-foundation`, `block2` | 2 each | 0.5 and 0.6 generations (winit vs newer crates) |
+| `zip`, `quick-xml`, `roxmltree`, `png`, `kurbo`, `harfrust`, `font-types`, `hashbrown`, `syn`, `thiserror`, `rand`, `sha1`, `sha2`, `md-5`, `digest`, `base64`, `bitflags`, `miniz_oxide`, and 10 small helpers | 2 each | major-version splits in the wider ecosystem |
+
+## Pinned SHAs (task 0.2)
+
+| Submodule | SHA | Date |
+|---|---|---|
+| wordcraft | `514085c` | HEAD 2026-11-14 |
+| gridcraft | `c0ee120` | HEAD 2026-11-14 |
+| deckcraft | `69379cf` | HEAD 2026-11-14 |
+| pdfcraft | `e98dc17` | HEAD 2026-11-14 |
+| craft-libs | `e2dc681` | PdfCraft's pin (D16) |
+| craft-fonts | `c1db6d1` | HEAD 2026-11-14 |
+| craft-i18n | `1e51542` | WordCraft's pin (D17) |
