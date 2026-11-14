@@ -1676,6 +1676,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "craftworks-harness"
+version = "0.1.0"
+dependencies = [
+ "craftworks-core",
+ "craftworks-render",
+ "eframe",
+ "egui",
+ "egui-wgpu",
+ "image",
+ "log",
+ "pdfcraft-engine",
+ "rfd",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
+name = "craftworks-render"
+version = "0.1.0"
+dependencies = [
+ "craftworks-core",
+ "egui",
+ "egui-wgpu",
+ "log",
+ "wgpu",
+]
+
+[[package]]
 name = "crc32fast"
 version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"

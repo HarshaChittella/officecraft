@@ -1,0 +1,18 @@
+[package]
+name = "craftworks-render"
+description = "Runs one Craft engine per egui Context and paints it with egui-wgpu."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+craftworks-core = { path = "../craftworks-core" }
+egui.workspace = true
+egui-wgpu.workspace = true
+wgpu.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true

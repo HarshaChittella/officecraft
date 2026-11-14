@@ -142,6 +142,40 @@ H7 and the PdfCraft live backend are the final task in Phase 7, after the Word, 
 - Every other command is logged at `warn` (D13).
 - This is what makes D6's "remove the window parts" work without patches H2–H4.
 
+## D19 `Editor::open` may finish later. SETTLED 2026-11-14
+
+PdfCraft reads files on a worker thread, so its tab appears on a later frame. `open` returns `Opened::Now(doc)` or `Opened::Later`. For `Later`, the host waits until `find_path(path)` finds the document. Word, Sheet and Deck always return `Now`.
+
+## D20 Closing goes through each app's own "user asked" path. SETTLED 2026-11-14
+
+| Engine | Close as the user would | Prompt open while |
+|---|---|---|
+| WordCraft | `session.activate` + `WordApp::run("file.close")` | `dialog.is_some()` |
+| GridCraft | `enter_window` + `SheetApp::run("file.close")` | `dialog.is_some()` |
+| DeckCraft | `session.set_active` + `close_presentation()` | `dialog.is_some()` |
+| PdfCraft | `request_close_tab(i)` | `close_request.is_some()` |
+
+`Editor::close_state` reads `Closed` once the document is gone, `Pending` while the prompt is open, and `Cancelled` otherwise. The host asks only after at least one frame has run.
+
+## D21 PdfCraft Save As to a host-chosen path is not available yet. SETTLED 2026-11-14
+
+PdfCraft has no public "save to this path" API; Save As always goes through its own file panel. `PdfEditor::save_as` returns an error saying so, and PdfCraft's own File ▸ Save As works inside the tab. Re-implementing its save (incremental writes, xattr preservation, signature flattening) would break the "never re-implement an editor" rule. A small upstream hook can be added with the Services patch (D12).
+
+## D22 Phase 1 measurements (D1's cost). 2026-11-14
+
+Debug build, `harness --shots`, Apple Silicon. Resident memory:
+
+| Stage | RSS |
+|---|---|
+| Harness window, no engines | 114 MB |
+| + WordCraft shown | 409 MB (+295: its fonts, proofing data and layout caches) |
+| + GridCraft shown | 458 MB (+49) |
+| + DeckCraft shown | 479 MB (+21) |
+| + PdfCraft shown | 481 MB (+2) |
+| + 12 more documents (5 each for Word, Sheet, Deck) | 492 MB (+11) |
+
+Font atlas per engine context: Word 8192×64 (2 MB RGBA), the others 8192×32 (1 MB). So a context per engine costs about 5 MB of atlases, small next to the engines themselves. Each atlas is uploaded whole 1–2 times while the engine first starts (fonts install on the frame after `logic`), and **never on a later tab switch** (12 switches checked). The first frame after a switch takes 3.7–6.4 ms of CPU.
+
 ## Upstream test results (task 0.6)
 
 Runs on 2026-11-14. Every run is logged under `plan/logs/` (gitignored), one timestamped file per run.

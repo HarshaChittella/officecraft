@@ -1,0 +1,42 @@
+Craftworks Phase 1 harness run
+MEM start, no engines: 114 MB resident
+PASS the PDF opened in a tab
+PASS four tabs, one per kind (have 4)
+PASS Document tab shows its engine
+MEM after Document shown: 409 MB resident
+PASS Sheet tab shows its engine
+MEM after Sheet shown: 457 MB resident
+PASS Presentation tab shows its engine
+MEM after Presentation shown: 480 MB resident
+PASS Pdf tab shows its engine
+MEM after Pdf shown: 480 MB resident
+SWITCH  0 → Document     first frame: font atlas rebuilt = false, cpu 3.7 ms
+SWITCH  1 → Sheet        first frame: font atlas rebuilt = false, cpu 4.1 ms
+SWITCH  2 → Presentation first frame: font atlas rebuilt = false, cpu 5.7 ms
+SWITCH  3 → Pdf          first frame: font atlas rebuilt = false, cpu 4.4 ms
+SWITCH  4 → Document     first frame: font atlas rebuilt = false, cpu 3.7 ms
+SWITCH  5 → Sheet        first frame: font atlas rebuilt = false, cpu 4.2 ms
+SWITCH  6 → Presentation first frame: font atlas rebuilt = false, cpu 6.0 ms
+SWITCH  7 → Pdf          first frame: font atlas rebuilt = false, cpu 4.4 ms
+SWITCH  8 → Document     first frame: font atlas rebuilt = false, cpu 3.7 ms
+SWITCH  9 → Sheet        first frame: font atlas rebuilt = false, cpu 4.3 ms
+SWITCH 10 → Presentation first frame: font atlas rebuilt = false, cpu 5.9 ms
+SWITCH 11 → Pdf          first frame: font atlas rebuilt = false, cpu 4.3 ms
+PASS no font atlas rebuild on any of 12 tab switches (no font flash)
+PASS Document: edit → dirty → Save As plan/shots/saved.docx (6597 bytes) → clean Ok(())
+PASS Sheet: edit → dirty → Save As plan/shots/saved.xlsx (4146 bytes) → clean Ok(())
+PASS Presentation: edit → dirty → Save As plan/shots/saved.pptx (23438 bytes) → clean Ok(())
+PASS Pdf: rotate page → dirty → Save in place → clean Ok(())
+PASS typing reaches WordCraft through the input path
+PASS arrow keys, typing and Enter reach GridCraft (the saved workbook is dirty again)
+PASS closing a document with unsaved changes shows WordCraft's own Save prompt and keeps the tab
+PASS Cancel closes the prompt and keeps the document and its tab
+PASS the edit made before Cancel is still in the document (dirty now: Some(false))
+MEM 4 engines, 1 document each: 489 MB resident
+MEM 5 documents each for Document, Sheet, Presentation: 497 MB resident
+FONTS Document: atlas Some([8192, 64]) ≈ 2.0 MB RGBA, uploaded whole 2 time(s)
+FONTS Sheet: atlas Some([8192, 32]) ≈ 1.0 MB RGBA, uploaded whole 1 time(s)
+FONTS Presentation: atlas Some([8192, 32]) ≈ 1.0 MB RGBA, uploaded whole 2 time(s)
+FONTS Pdf: atlas Some([8192, 32]) ≈ 1.0 MB RGBA, uploaded whole 2 time(s)
+WARNINGS (0):
+ALL PASS

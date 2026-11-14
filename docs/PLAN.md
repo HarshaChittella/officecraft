@@ -1,6 +1,6 @@
 # Craftworks plan
 
-Status: **approved** 2026-11-14 (D1–D17 settled). **Phase 0 done** 2026-11-14; Phase 1 next.
+Status: **approved** 2026-11-14 (D1–D22 settled). **Phase 0 done**, **Phase 1 done** 2026-11-14; Phase 2 next (needs Xcode).
 Companions: [decisions.md](decisions.md) (open and settled choices), [upstream-patches.md](upstream-patches.md) (hooks we need in the Craft repos).
 
 This plan turns the brief's §5 into tasks. Each phase lists its tasks, then the checks that must pass before the next phase starts. After every phase: `cargo test`, `cargo clippy --all-targets -- -D warnings`, `xcodebuild build` (from Phase 2), and screenshots where the UI changed.
@@ -75,6 +75,16 @@ Tasks
 - 1.8 Screenshots of each tab: `harness --screenshot <dir>`, written with `egui_kittest` or a `ui.screenshot`-style readback.
 
 Done when: the harness opens one document of each type in tabs; switching tabs swaps the ribbon; editing and saving work in every tab; switching shows no font flash (no `set_fonts` on switch, and no glyph-atlas rebuild in the frame log); four screenshots exist.
+
+**Result (2026-11-14): all met.** `harness --shots` reports ALL PASS with 0 warnings ([report](screenshots/phase1/harness-report.txt)):
+- Four tabs, one per kind, each showing its full app (title row, ribbon, canvas, status bar).
+- 12 switches with no font-atlas rebuild.
+- Edit → dirty → Save As → clean in Document, Sheet and Presentation, and edit → Save in place for the PDF.
+- Typing reaches WordCraft, and arrow keys + typing + Enter reach GridCraft, through the input path.
+- A dirty close shows WordCraft's own Save prompt, and Cancel keeps the document.
+- Screenshots: [Document](screenshots/phase1/tab-document.png), [Sheet](screenshots/phase1/tab-sheet.png), [Presentation](screenshots/phase1/tab-presentation.png), [PDF](screenshots/phase1/tab-pdf.png), [Save prompt](screenshots/phase1/dirty-close-prompt.png), [typed in sheet](screenshots/phase1/typed-in-sheet.png).
+- Core: 20 tests, including 8 that drive the real engines. Render: 7 tests.
+- Not covered yet: real keyboard, mouse and IME from macOS (the scripted input goes through the same path, but it isn't NSEvent), and PDF Save As to a chosen path (D21).
 
 ## Phase 2: Rendering bridge
 

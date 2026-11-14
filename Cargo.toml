@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "apps/*"]
 # The vendored Craft repos are path dependencies, not members: each keeps its own workspace.
 exclude = ["vendor"]
 
@@ -23,6 +23,11 @@ pdfcraft-engine = { path = "vendor/pdfcraft/crates/engine" }
 wordcraft-doc = { path = "vendor/wordcraft/crates/doc" }
 # Third-party crates already in the Craft apps' graph (same versions).
 egui = "0.37"
+egui-wgpu = "0.37"
+eframe = { version = "0.37", default-features = false, features = ["default_fonts", "wgpu", "accesskit", "persistence"] }
+wgpu = "30"
+rfd = "0.17"
+image = { version = "0.25", default-features = false, features = ["png"] }
 serde_json = "1"
 log = "0.4"
 
