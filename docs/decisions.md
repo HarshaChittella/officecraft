@@ -156,13 +156,13 @@ With D16, **no craft-libs crate is duplicated**. The rest are third-party crates
 
 | Crate | Copies | Why it cannot merge |
 |---|---|---|
-| `read-fonts` | 4 | skrifa and harfrust generations differ across the apps' font stacks |
-| `skrifa` | 3 | same as `read-fonts` |
-| `phf`, `phf_shared`, `phf_generator`, `phf_macros` | 3 each | 0.11/0.12/0.13 from different parsers |
-| `getrandom` | 3 | 0.2/0.3/0.4 from rand generations |
+| `read-fonts` | 4 (0.39, 0.41, 0.43, 0.44) | each app's font stack pins a different `skrifa`/`harfrust` generation |
+| `skrifa` | 3 (0.42, 0.44, 0.47) | same as `read-fonts` |
+| `phf`, `phf_shared`, `phf_generator`, `phf_macros` | 3 each | 0.11, 0.13 and 0.14, from different dependents |
+| `getrandom` | 3 (0.2, 0.3, 0.4) | different `rand` generations |
 | `vello_cpu`, `vello_common` | 2 each | 0.0.8 is PdfCraft's vendored renderer (hayro); 0.2 is DeckCraft's renderer. Intended |
-| `objc2`, `objc2-app-kit`, `objc2-foundation`, `block2` | 2 each | 0.5 and 0.6 generations (winit vs newer crates) |
-| `zip`, `quick-xml`, `roxmltree`, `png`, `kurbo`, `harfrust`, `font-types`, `hashbrown`, `syn`, `thiserror`, `rand`, `sha1`, `sha2`, `md-5`, `digest`, `base64`, `bitflags`, `miniz_oxide`, and 10 small helpers | 2 each | major-version splits in the wider ecosystem |
+| `objc2`, `objc2-app-kit`, `objc2-foundation`, `block2` | 2 each | 0.5 and 0.6 generations |
+| `zip`, `quick-xml`, `roxmltree`, `png`, `kurbo`, `harfrust`, `font-types`, `hashbrown`, `syn`, `thiserror`, `rand`, `sha1`, `sha2`, `md-5`, `digest`, `base64`, `bitflags`, `miniz_oxide`, and 10 small helpers | 2 each | semver splits, for example `zip` 3 and 9, `quick-xml` 0.41 and 0.42, `kurbo` 0.11 and 0.13, `png` 0.17 and 0.18 |
 
 ## Pinned SHAs (task 0.2)
 
