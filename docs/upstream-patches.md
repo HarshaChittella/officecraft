@@ -6,18 +6,18 @@ Every change we need inside the Craft repos. Each patch:
 - is small and tested (it follows that repo's AGENTS.md: a test, `cargo xtask ci`, no panics, no `unsafe`), and
 - can be offered upstream as a PR.
 
-Status: **proposed**. Nothing is written yet. Line references are to HEAD on 2026-11-14.
+Status as of 2026-11-14 (Phase 1).
 
-| Id | Repo | Change | Why | Size |
-|---|---|---|---|---|
-| H1 | wordcraft | Add `WordApp::set_hosted(Hosted)`. It switches to single-window mode (`Windows::single()`, today `#[cfg(test)]` at `crates/ui-egui/src/windows.rs:131`) and sets a `hosted` flag. | Without it, every New or Open on the desktop opens a native window (`native: cfg!(not(wasm32))`) | ~30 lines + test |
-| H2 | wordcraft | When hosted, `chrome::title_bar` leaves out the window parts: traffic-light inset, `StartDrag`, double-click maximize, viewport title. The QAT, search and file-name row stays (D6 a). Or the whole row is hidden (D6 b). | Our window owns those parts | ~20 lines |
-| H3 | deckcraft | `SlideApp.chrome: Chrome { title_bar, window_controls }`, the same shape as GridCraft's. View ▸ New Window (`doc_window.rs`) is sent to the host when hosted. | Same as H1/H2 | ~40 lines |
-| H4 | gridcraft | When hosted, `Chrome` gets `window_controls: bool`, which stops drag and maximize from the title bar while the QAT row stays (D6 a). Nothing if we pick D6 b, since `title_bar: false` already exists. | Same | ~15 lines |
-| H5 | pdfcraft | `PdfCraftApp` inherent methods `logic(ctx)`, `ui(ui)`, `raw_input_hook(ctx, raw)`, `persist() -> String` (already exists), `on_exit()`. The `eframe::App` impl calls them. | So it can be driven without an `eframe::Frame` (F4) | ~25 lines |
-| H6 | pdfcraft | Hosted mode: hide `chrome::tab_strip` and window controls; add `views() -> Vec<ViewInfo>`, `select_view(i)` and `close_view(i) -> CloseTicket`; turn off cross-document split panes. Optional: a `pick_open`/`pick_save` host hook in place of `rfd`. | D3 | ~80 lines |
-| H7 | pdfcraft | A way for an in-process host to run automation tools against the **open** views, for example `Automation::for_session(&mut Session)`, or the UI control channel's dispatcher exposed as a function. | Live AI edits on an open PDF (Phase 7) | to scope in Phase 7 |
-| H8 | all | If missing, a public per-document API: list documents with id, title, path and dirty state; activate a document. | `Editor::documents()` / `activate()` | small, per app |
+| Id | Repo | Change | Status |
+|---|---|---|---|
+| H1 | wordcraft | `WordApp::use_one_window()`: every document in the one window, as the web app does (`Windows::single`, previously test-only). Activating a document (`session.activate`) shows it on the next frame. | **Done** `793e65c` on `HarshaChittella/wordcraft` `craftworks/hosted`. Test `one_window_shows_each_document_it_is_asked_to` fails without it (2 windows). `wordcraft-ui-egui`: 1,255 tests pass, clippy clean. |
+| H2–H4 | wordcraft, deckcraft, gridcraft | Window parts of the title row (D6). | **Not needed.** The traffic-light inset is already off in the libraries (`integrated_titlebar: false` is the default; only the desktop binaries turn it on). Drag-to-move and double-click-to-zoom only send `ViewportCommand::StartDrag`/`Maximized`, which the host drops (D18). |
+| H5 | pdfcraft | Inherent `raw_input_hook(ctx, raw)`, `logic(ctx)`, `ui(ui)`, `exiting()`; `eframe::App` calls them. `persist()`/`restore()` already existed. | **Done** `20063ac` on `HarshaChittella/pdfcraft` `craftworks/hosted`. |
+| H6 | pdfcraft | `PdfCraftApp::hosted`: no tab strip. The host picks the tab with `active` (already public) and reads `has_unsaved_work(i)` (now public). Optional for later: host hooks in place of `rfd` (D12); turning off cross-document split panes (D3). | **Done**, same commit. 3 tests drive the app with a plain egui pass; the hosted one fails without the change. `pdfcraft-ui-egui`: all tests pass except the 8 known environment failures. |
+| H7 | pdfcraft | Run automation tools against the open views. | Phase 7, last task (D14). |
+| H8 | all | Per-document list and activate API. | **Not needed.** WordCraft `session.documents()`/`activate`; GridCraft `session.windows()`/`enter_window`; DeckCraft `session.documents()`/`set_active`; PdfCraft `views`/`active`. All public. |
+
+Submodules `vendor/wordcraft` and `vendor/pdfcraft` now track the forks' `craftworks/hosted` branch (`.gitmodules`), because the recorded commits exist only there. Commits in the forks leave out agent attribution, per the Craft repos' house rule 15.
 
 Not needed:
 

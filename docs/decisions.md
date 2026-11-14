@@ -135,6 +135,13 @@ H7 and the PdfCraft live backend are the final task in Phase 7, after the Word, 
 - WordCraft's suite gives identical results on either revision.
 - **We keep `1e51542`.** The older revision would drop about 27k lines of translations, most of them WordCraft's (`wordcraft.tsv` across 36 locales, including missing French and Arabic rows), and no test would notice. The newer one costs one glyph and one label in PdfCraft, which PdfCraft upstream will hit as well when it moves to this revision.
 
+## D18 Window commands from the apps are dropped by the host. SETTLED 2026-11-14
+
+- `StartDrag`, `Maximized`, `Minimized`, `Fullscreen`, `OuterPosition`, `InnerSize`, `Decorations` and `Title` (the window is ours; tab titles come from each engine's document list) are **dropped deliberately** and logged at `debug`.
+- `CancelClose` and `Close` feed the close state machine.
+- Every other command is logged at `warn` (D13).
+- This is what makes D6's "remove the window parts" work without patches H2–H4.
+
 ## Upstream test results (task 0.6)
 
 Runs on 2026-11-14. Every run is logged under `plan/logs/` (gitignored), one timestamped file per run.

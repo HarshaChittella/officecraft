@@ -1,6 +1,7 @@
 [submodule "vendor/wordcraft"]
 	path = vendor/wordcraft
 	url = https://github.com/HarshaChittella/wordcraft.git
+	branch = craftworks/hosted
 [submodule "vendor/gridcraft"]
 	path = vendor/gridcraft
 	url = https://github.com/HarshaChittella/gridcraft.git
@@ -10,6 +11,7 @@
 [submodule "vendor/pdfcraft"]
 	path = vendor/pdfcraft
 	url = https://github.com/HarshaChittella/pdfcraft.git
+	branch = craftworks/hosted
 [submodule "vendor/craft-fonts"]
 	path = vendor/craft-fonts
 	url = https://github.com/storytold/craft-fonts.git
