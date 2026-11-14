@@ -27,8 +27,7 @@ pub fn new_editor(kind: Kind) -> Box<dyn Editor> {
 
 /// `path` as the UTF-8 string the apps' commands take.
 fn path_str(path: &Path) -> Result<&str> {
-    path.to_str()
-        .ok_or_else(|| EditorError(format!("{} is not a UTF-8 path", path.display())))
+    path.to_str().ok_or_else(|| EditorError(format!("{} is not a UTF-8 path", path.display())))
 }
 
 /// The `u64` id an app uses, from a JSON reply field.

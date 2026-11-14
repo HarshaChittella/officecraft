@@ -14,10 +14,7 @@ pub struct WordEditor {
 
 impl WordEditor {
     pub fn new() -> Self {
-        let mut app = WordApp::new(
-            Session::new(wordcraft_doc::Document::new()),
-            Services::default(),
-        );
+        let mut app = WordApp::new(Session::new(wordcraft_doc::Document::new()), Services::default());
         app.use_one_window();
         WordEditor { app }
     }
@@ -51,17 +48,7 @@ impl Editor for WordEditor {
     }
 
     fn documents(&self) -> Vec<DocInfo> {
-        self.app
-            .session
-            .documents()
-            .into_iter()
-            .map(|d| DocInfo {
-                id: DocId(d.id),
-                title: d.title,
-                path: d.path,
-                dirty: d.dirty,
-            })
-            .collect()
+        self.app.session.documents().into_iter().map(|d| DocInfo { id: DocId(d.id), title: d.title, path: d.path, dirty: d.dirty }).collect()
     }
 
     fn active(&self) -> Option<DocId> {
@@ -70,10 +57,7 @@ impl Editor for WordEditor {
 
     fn activate(&mut self, doc: DocId) -> Result<()> {
         // The window follows the session's active document on the next frame (`sync_document`).
-        self.app
-            .session
-            .activate(doc.0)
-            .map_err(|e| EditorError(e.to_string()))
+        self.app.session.activate(doc.0).map_err(|e| EditorError(e.to_string()))
     }
 
     fn new_document(&mut self) -> Result<DocId> {
@@ -97,8 +81,7 @@ impl Editor for WordEditor {
 
     fn save_as(&mut self, doc: DocId, path: &Path) -> Result<()> {
         self.ensure_active(doc)?;
-        self.app
-            .run("file.saveAs", json!({"path": path_str(path)?}))?;
+        self.app.run("file.saveAs", json!({"path": path_str(path)?}))?;
         Ok(())
     }
 

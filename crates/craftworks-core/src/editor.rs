@@ -107,10 +107,7 @@ pub trait Editor {
 
     /// The open document whose file is `path`.
     fn find_path(&self, path: &Path) -> Option<DocId> {
-        self.documents()
-            .into_iter()
-            .find(|d| d.path.as_deref() == Some(path))
-            .map(|d| d.id)
+        self.documents().into_iter().find(|d| d.path.as_deref() == Some(path)).map(|d| d.id)
     }
 
     /// Saves `doc` where it came from. An untitled document needs [`Editor::save_as`].

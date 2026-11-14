@@ -47,10 +47,7 @@ impl Tabs {
 
     /// The tab that shows `doc` of `kind`, if any.
     pub fn find(&self, kind: Kind, doc: DocId) -> Option<TabId> {
-        self.tabs
-            .iter()
-            .find(|t| t.kind == kind && t.doc == doc)
-            .map(|t| t.id)
+        self.tabs.iter().find(|t| t.kind == kind && t.doc == doc).map(|t| t.id)
     }
 
     pub fn active(&self) -> Option<&Tab> {
@@ -66,11 +63,8 @@ impl Tabs {
         }
         self.next = self.next.saturating_add(1);
         let id = TabId(self.next);
-        let at = self
-            .active_index()
-            .map_or(self.tabs.len(), |i| i.saturating_add(1));
-        self.tabs
-            .insert(at.min(self.tabs.len()), Tab { id, kind, doc });
+        let at = self.active_index().map_or(self.tabs.len(), |i| i.saturating_add(1));
+        self.tabs.insert(at.min(self.tabs.len()), Tab { id, kind, doc });
         self.active = Some(id);
         id
     }
@@ -90,11 +84,7 @@ impl Tabs {
         let i = self.tabs.iter().position(|t| t.id == id)?;
         let tab = self.tabs.remove(i);
         if self.active == Some(id) {
-            self.active = self
-                .tabs
-                .get(i)
-                .or_else(|| i.checked_sub(1).and_then(|j| self.tabs.get(j)))
-                .map(|t| t.id);
+            self.active = self.tabs.get(i).or_else(|| i.checked_sub(1).and_then(|j| self.tabs.get(j))).map(|t| t.id);
         }
         Some(tab)
     }

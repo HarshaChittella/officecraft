@@ -1,5 +1,6 @@
 //! Each engine adapter, driven the way the host drives it: frames with `logic` and `ui` in one
 //! egui pass, documents made, edited with the app's own commands, saved, reopened and closed.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // test helpers fail loudly
 
 use craftworks_core::engines::{DeckEditor, PdfEditor, SheetEditor, WordEditor, new_editor};
 use craftworks_core::{CloseState, DocId, Editor, Kind};
@@ -17,13 +18,8 @@ fn scratch(name: &str) -> PathBuf {
 /// `n` frames, as the host runs them (input hook, then one pass with `logic` and `ui`).
 fn frames(ctx: &egui::Context, ed: &mut dyn Editor, n: usize) {
     for _ in 0..n {
-        let mut input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                egui::vec2(1400.0, 900.0),
-            )),
-            ..Default::default()
-        };
+        let mut input =
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
         ed.raw_input_hook(ctx, &mut input);
         let mut out = ctx.run_ui(input, |ui| {
             ed.logic(ui.ctx());
@@ -50,14 +46,8 @@ fn round_trip(kind: Kind, ext: &str, edit: (&str, serde_json::Value)) {
     frames(&ctx, ed.as_mut(), 2);
     ed.run_command(edit.0, edit.1.clone()).unwrap();
     frames(&ctx, ed.as_mut(), 1);
-    assert!(
-        info(ed.as_ref(), doc).dirty,
-        "{kind:?}: an edit makes the document dirty"
-    );
-    assert!(
-        ed.save(doc).is_err(),
-        "{kind:?}: an untitled document needs Save As"
-    );
+    assert!(info(ed.as_ref(), doc).dirty, "{kind:?}: an edit makes the document dirty");
+    assert!(ed.save(doc).is_err(), "{kind:?}: an untitled document needs Save As");
 
     let path = dir.join(format!("saved.{ext}"));
     ed.save_as(doc, &path).unwrap();
@@ -65,10 +55,7 @@ fn round_trip(kind: Kind, ext: &str, edit: (&str, serde_json::Value)) {
     let saved = info(ed.as_ref(), doc);
     assert!(!saved.dirty, "{kind:?}: clean after saving");
     assert_eq!(saved.path.as_deref(), Some(path.as_path()));
-    assert!(
-        std::fs::metadata(&path).unwrap().len() > 0,
-        "{kind:?}: the file is written"
-    );
+    assert!(std::fs::metadata(&path).unwrap().len() > 0, "{kind:?}: the file is written");
 
     // Saving again in place works now that it has a file.
     ed.run_command(edit.0, edit.1).unwrap();
@@ -82,11 +69,7 @@ fn round_trip(kind: Kind, ext: &str, edit: (&str, serde_json::Value)) {
     let opened = other.open(&path).unwrap().now().unwrap();
     frames(&ctx2, other.as_mut(), 2);
     let o = info(other.as_ref(), opened);
-    assert_eq!(
-        o.path.as_deref(),
-        Some(path.as_path()),
-        "{kind:?}: reopened from its file"
-    );
+    assert_eq!(o.path.as_deref(), Some(path.as_path()), "{kind:?}: reopened from its file");
     assert!(!o.dirty);
 
     // A clean document closes without asking.
@@ -106,15 +89,8 @@ fn dirty_close_asks(kind: Kind, edit: (&str, serde_json::Value)) {
     frames(&ctx, ed.as_mut(), 1);
     ed.request_close(doc).unwrap();
     frames(&ctx, ed.as_mut(), 2);
-    assert_eq!(
-        ed.close_state(doc),
-        CloseState::Pending,
-        "{kind:?}: the Save prompt is up"
-    );
-    assert!(
-        info(ed.as_ref(), doc).dirty,
-        "{kind:?}: the edit is still there"
-    );
+    assert_eq!(ed.close_state(doc), CloseState::Pending, "{kind:?}: the Save prompt is up");
+    assert!(info(ed.as_ref(), doc).dirty, "{kind:?}: the edit is still there");
 }
 
 fn word_edit() -> (&'static str, serde_json::Value) {
@@ -160,11 +136,7 @@ fn closing_a_dirty_presentation_asks() {
 #[test]
 fn switching_documents_shows_the_one_asked_for() {
     let ctx = egui::Context::default();
-    let mut eds: Vec<Box<dyn Editor>> = vec![
-        Box::new(WordEditor::new()),
-        Box::new(SheetEditor::new()),
-        Box::new(DeckEditor::new()),
-    ];
+    let mut eds: Vec<Box<dyn Editor>> = vec![Box::new(WordEditor::new()), Box::new(SheetEditor::new()), Box::new(DeckEditor::new())];
     for ed in &mut eds {
         let kind = ed.kind();
         frames(&ctx, ed.as_mut(), 2);
@@ -175,15 +147,8 @@ fn switching_documents_shows_the_one_asked_for() {
         assert_eq!(ed.active(), Some(b));
         ed.activate(a).unwrap();
         frames(&ctx, ed.as_mut(), 2);
-        assert_eq!(
-            ed.active(),
-            Some(a),
-            "{kind:?}: the engine shows the document the tab picked"
-        );
-        assert!(
-            ed.activate(DocId(u64::MAX)).is_err(),
-            "{kind:?}: an unknown document is an error"
-        );
+        assert_eq!(ed.active(), Some(a), "{kind:?}: the engine shows the document the tab picked");
+        assert!(ed.activate(DocId(u64::MAX)).is_err(), "{kind:?}: an unknown document is an error");
     }
 }
 
@@ -206,9 +171,7 @@ fn open_pdf(ctx: &egui::Context, ed: &mut PdfEditor, path: &std::path::Path) -> 
 fn pdfs_open_switch_save_and_close() {
     let dir = scratch("pdf");
     let make = |name: &str, text: &str| {
-        let bytes = pdfcraft_engine::Session::new()
-            .create_from_text("t", text)
-            .unwrap();
+        let bytes = pdfcraft_engine::Session::new().create_from_text("t", text).unwrap();
         let p = dir.join(name);
         std::fs::write(&p, bytes.as_slice()).unwrap();
         p
@@ -224,11 +187,7 @@ fn pdfs_open_switch_save_and_close() {
     let b = open_pdf(&ctx, &mut ed, &b_path);
     assert_ne!(a, b);
     assert_eq!(ed.active(), Some(b));
-    assert_eq!(
-        open_pdf(&ctx, &mut ed, &a_path),
-        a,
-        "opening it again shows its tab"
-    );
+    assert_eq!(open_pdf(&ctx, &mut ed, &a_path), a, "opening it again shows its tab");
     ed.activate(b).unwrap();
     frames(&ctx, &mut ed, 2);
     assert_eq!(ed.active(), Some(b));

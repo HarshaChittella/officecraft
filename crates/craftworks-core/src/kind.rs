@@ -22,17 +22,13 @@ impl Kind {
     /// The kind that opens `path`, from its extension (any case). `None` for a file no engine
     /// opens, or one without an extension.
     pub fn for_path(path: &Path) -> Option<Kind> {
-        path.extension()
-            .and_then(|e| e.to_str())
-            .and_then(Kind::for_extension)
+        path.extension().and_then(|e| e.to_str()).and_then(Kind::for_extension)
     }
 
     /// The kind that opens files with extension `ext` (without the dot, any case).
     pub fn for_extension(ext: &str) -> Option<Kind> {
         match ext.to_ascii_lowercase().as_str() {
-            "docx" | "doc" | "odt" | "rtf" | "html" | "htm" | "md" | "markdown" | "tex" | "txt" => {
-                Some(Kind::Document)
-            }
+            "docx" | "doc" | "odt" | "rtf" | "html" | "htm" | "md" | "markdown" | "tex" | "txt" => Some(Kind::Document),
             "xlsx" | "csv" | "tsv" => Some(Kind::Sheet),
             "pptx" => Some(Kind::Presentation),
             "pdf" => Some(Kind::Pdf),
@@ -69,9 +65,7 @@ mod tests {
 
     #[test]
     fn every_supported_extension_routes_to_its_engine() {
-        for ext in [
-            "docx", "doc", "odt", "rtf", "html", "htm", "md", "markdown", "tex", "txt",
-        ] {
+        for ext in ["docx", "doc", "odt", "rtf", "html", "htm", "md", "markdown", "tex", "txt"] {
             assert_eq!(Kind::for_extension(ext), Some(Kind::Document), "{ext}");
         }
         for ext in ["xlsx", "csv", "tsv"] {
@@ -83,26 +77,14 @@ mod tests {
 
     #[test]
     fn extensions_match_in_any_case() {
-        assert_eq!(
-            Kind::for_path(Path::new("/x/Report.DOCX")),
-            Some(Kind::Document)
-        );
+        assert_eq!(Kind::for_path(Path::new("/x/Report.DOCX")), Some(Kind::Document));
         assert_eq!(Kind::for_path(Path::new("Budget.Xlsx")), Some(Kind::Sheet));
         assert_eq!(Kind::for_path(Path::new("a.PDF")), Some(Kind::Pdf));
     }
 
     #[test]
     fn unknown_or_missing_extensions_route_nowhere() {
-        for p in [
-            "notes",
-            "archive.zip",
-            "photo.png",
-            ".docx",
-            "deck.ppt",
-            "book.xls",
-            "dir.docx/",
-            "",
-        ] {
+        for p in ["notes", "archive.zip", "photo.png", ".docx", "deck.ppt", "book.xls", "dir.docx/", ""] {
             let got = Kind::for_path(Path::new(p));
             // `dir.docx/` is a path whose last part is `dir.docx`: it routes like the file name does.
             if p == "dir.docx/" {

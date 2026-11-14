@@ -30,8 +30,7 @@ impl PdfEditor {
     }
 
     fn index_or_err(&self, doc: DocId) -> Result<usize> {
-        self.index_of(doc)
-            .ok_or_else(|| EditorError(format!("PdfCraft has no tab for document {}", doc.0)))
+        self.index_of(doc).ok_or_else(|| EditorError(format!("PdfCraft has no tab for document {}", doc.0)))
     }
 }
 
@@ -65,10 +64,7 @@ impl Editor for PdfEditor {
     }
 
     fn active(&self) -> Option<DocId> {
-        self.app
-            .active
-            .and_then(|i| self.app.views.get(i))
-            .map(|v| DocId(v.id.0))
+        self.app.active.and_then(|i| self.app.views.get(i)).map(|v| DocId(v.id.0))
     }
 
     fn activate(&mut self, doc: DocId) -> Result<()> {
@@ -83,16 +79,10 @@ impl Editor for PdfEditor {
 
     fn open(&mut self, path: &Path) -> Result<Opened> {
         match self.app.open_path(path_str(path)?) {
-            OpenOutcome::Opened | OpenOutcome::Focused => self
-                .active()
-                .map(Opened::Now)
-                .ok_or_else(|| "PdfCraft opened no tab".into()),
+            OpenOutcome::Opened | OpenOutcome::Focused => self.active().map(Opened::Now).ok_or_else(|| "PdfCraft opened no tab".into()),
             // Read on a worker; its tab appears on a later frame.
             OpenOutcome::Pending => Ok(Opened::Later),
-            _ => Err(EditorError(format!(
-                "PdfCraft couldn't open {}",
-                path.display()
-            ))),
+            _ => Err(EditorError(format!("PdfCraft couldn't open {}", path.display()))),
         }
     }
 

@@ -14,9 +14,7 @@ pub struct SheetEditor {
 
 impl SheetEditor {
     pub fn new() -> Self {
-        SheetEditor {
-            app: SheetApp::new(Session::new(), Services::default()),
-        }
+        SheetEditor { app: SheetApp::new(Session::new(), Services::default()) }
     }
 
     pub fn app(&mut self) -> &mut SheetApp {
@@ -31,10 +29,7 @@ impl SheetEditor {
     }
 
     fn after_open(&mut self, reply: &Value) -> Result<DocId> {
-        reply_id(reply, "window")
-            .or(self.app.session.active_window())
-            .map(DocId)
-            .ok_or_else(|| "GridCraft opened no window".into())
+        reply_id(reply, "window").or(self.app.session.active_window()).map(DocId).ok_or_else(|| "GridCraft opened no window".into())
     }
 }
 
@@ -84,21 +79,13 @@ impl Editor for SheetEditor {
     }
 
     fn open(&mut self, path: &Path) -> Result<Opened> {
-        let reply = self
-            .app
-            .run("file.open", json!({"path": path_str(path)?}))?;
+        let reply = self.app.run("file.open", json!({"path": path_str(path)?}))?;
         self.after_open(&reply).map(Opened::Now)
     }
 
     fn save(&mut self, doc: DocId) -> Result<()> {
         self.ensure_active(doc)?;
-        if self
-            .documents()
-            .iter()
-            .find(|d| d.id == doc)
-            .and_then(|d| d.path.as_ref())
-            .is_none()
-        {
+        if self.documents().iter().find(|d| d.id == doc).and_then(|d| d.path.as_ref()).is_none() {
             return Err("This workbook has no file yet: use Save As.".into());
         }
         self.app.run("file.save", json!({}))?;
@@ -107,8 +94,7 @@ impl Editor for SheetEditor {
 
     fn save_as(&mut self, doc: DocId, path: &Path) -> Result<()> {
         self.ensure_active(doc)?;
-        self.app
-            .run("file.saveAs", json!({"path": path_str(path)?}))?;
+        self.app.run("file.saveAs", json!({"path": path_str(path)?}))?;
         Ok(())
     }
 

@@ -14,9 +14,7 @@ pub struct DeckEditor {
 
 impl DeckEditor {
     pub fn new() -> Self {
-        DeckEditor {
-            app: SlideApp::new(Session::new(), Services::default()),
-        }
+        DeckEditor { app: SlideApp::new(Session::new(), Services::default()) }
     }
 
     pub fn app(&mut self) -> &mut SlideApp {
@@ -24,11 +22,7 @@ impl DeckEditor {
     }
 
     fn index_of(&self, doc: DocId) -> Option<usize> {
-        self.app
-            .session
-            .documents()
-            .iter()
-            .position(|d| d.uid == doc.0)
+        self.app.session.documents().iter().position(|d| d.uid == doc.0)
     }
 
     fn ensure_active(&mut self, doc: DocId) -> Result<()> {
@@ -39,8 +33,7 @@ impl DeckEditor {
     }
 
     fn active_or_err(&self) -> Result<DocId> {
-        self.active()
-            .ok_or_else(|| "DeckCraft has no presentation open".into())
+        self.active().ok_or_else(|| "DeckCraft has no presentation open".into())
     }
 }
 
@@ -60,12 +53,7 @@ impl Editor for DeckEditor {
             .session
             .documents()
             .iter()
-            .map(|d| DocInfo {
-                id: DocId(d.uid),
-                title: d.title(),
-                path: d.path.as_ref().map(PathBuf::from),
-                dirty: d.is_dirty(),
-            })
+            .map(|d| DocInfo { id: DocId(d.uid), title: d.title(), path: d.path.as_ref().map(PathBuf::from), dirty: d.is_dirty() })
             .collect()
     }
 
@@ -74,9 +62,7 @@ impl Editor for DeckEditor {
     }
 
     fn activate(&mut self, doc: DocId) -> Result<()> {
-        let i = self
-            .index_of(doc)
-            .ok_or_else(|| format!("DeckCraft has no presentation {}", doc.0))?;
+        let i = self.index_of(doc).ok_or_else(|| format!("DeckCraft has no presentation {}", doc.0))?;
         self.app.session.set_active(i);
         Ok(())
     }
@@ -93,13 +79,7 @@ impl Editor for DeckEditor {
 
     fn save(&mut self, doc: DocId) -> Result<()> {
         self.ensure_active(doc)?;
-        if self
-            .app
-            .session
-            .active()
-            .and_then(|d| d.path.as_ref())
-            .is_none()
-        {
+        if self.app.session.active().and_then(|d| d.path.as_ref()).is_none() {
             return Err("This presentation has no file yet: use Save As.".into());
         }
         self.app.run("file.save", json!({}))?;
@@ -108,8 +88,7 @@ impl Editor for DeckEditor {
 
     fn save_as(&mut self, doc: DocId, path: &Path) -> Result<()> {
         self.ensure_active(doc)?;
-        self.app
-            .run("file.saveAs", json!({"path": path_str(path)?}))?;
+        self.app.run("file.saveAs", json!({"path": path_str(path)?}))?;
         Ok(())
     }
 
