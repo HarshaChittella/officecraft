@@ -3,3 +3,4 @@
 /macos/build/
 *.xcframework
 .DS_Store
+/build/

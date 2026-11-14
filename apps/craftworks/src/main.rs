@@ -14,6 +14,8 @@
 mod app;
 mod check;
 mod logger;
+mod menu;
+mod session;
 mod settings;
 mod titlebar;
 
@@ -37,9 +39,16 @@ fn main() -> eframe::Result {
         }
     }
     if let Some(dir) = &check_dir {
-        // A check run keeps its settings (recent files) to itself.
+        // A check run keeps its settings (recent files, session) to itself.
         settings::use_dir(dir.join("settings"));
+    } else if let Some(dir) = std::env::var_os("CRAFTWORKS_SETTINGS_DIR") {
+        // Tests of the app bundle (scripts/finder-open-test.sh) keep yours untouched.
+        settings::use_dir(PathBuf::from(dir));
     }
+    // Finder's open-documents and the Dock's Quit arrive as Apple events: register before the
+    // event loop starts, so the event that launched the app is caught too.
+    #[cfg(target_os = "macos")]
+    let (_apple_events, apple_inbox) = fmv_macos_events::Registration::install();
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Craftworks")
@@ -57,8 +66,15 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             let render = cc.wgpu_render_state.clone().ok_or("Craftworks needs the wgpu renderer")?;
             let mut app = app::App::new(render, &cc.egui_ctx, forced_dark);
+            #[cfg(target_os = "macos")]
+            {
+                let ctx = cc.egui_ctx.clone();
+                apple_inbox.set_wake(move || ctx.request_repaint());
+                app.set_apple_events(apple_inbox.clone());
+            }
             match check_dir {
                 Some(dir) => app = app.with_check(check::Check::new(dir, forced_dark)),
+                None if files.is_empty() => app.restore_session(),
                 None => files.iter().for_each(|f| app.open(f)),
             }
             Ok(Box::new(app))

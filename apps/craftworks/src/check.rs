@@ -42,6 +42,8 @@ enum Stage {
     Routing { phase: u8 },
     Resize { i: usize, frames: u32 },
     Accessibility { frames: u32 },
+    Menus { phase: u8 },
+    Quit { phase: u8 },
     Memory { phase: u8 },
     Idle { started: bool, focused: bool },
     Report,
@@ -179,7 +181,7 @@ impl Check {
                     // WordCraft animates its caret's blink (a fade over a few frames), as the
                     // standalone app does: budgeted, not zero.
                     self.check(pct < 8.0, format!("a focused document with a blinking caret stays light ({pct:.1} % CPU, budget 8 %)"));
-                    self.stage = Stage::Report;
+                    self.stage = Stage::Quit { phase: 0 };
                 } else {
                     // macOS still sends mouse moves to a background window under the pointer, and
                     // each is a frame: a moving mouse here is activity, not idleness.
@@ -594,7 +596,64 @@ impl Check {
                 self.line(format!("A11Y merged tree: {nodes} nodes, {} labelled", labels.len()));
                 self.check(has("Tab content") && has("New tab"), "the window's tree has our chrome (tab list, New tab, tab content)");
                 self.check(has("Home") && has("Insert"), "GridCraft's ribbon (Home, Insert…) is grafted under the tab content");
-                self.stage = Stage::Memory { phase: 0 };
+                self.stage = Stage::Menus { phase: 0 };
+            }
+            // The menu bar, through `App::on_menu` (what a click runs).
+            Stage::Menus { phase } => {
+                let state = |app: &mut App| app.engine(Kind::Document).editor_mut().run_command("format.state", json!({})).unwrap_or_default();
+                match phase {
+                    0 => {
+                        self.check(app.has_native_menu(), "the native menu bar is installed");
+                        if let Some((tab, _)) = Self::tab_of(app, Kind::Document) {
+                            app.tabs.activate(tab);
+                        }
+                        self.wait = 8;
+                    }
+                    1 => {
+                        app.on_menu(ctx, "cw.key:⌘A");
+                        app.on_menu(ctx, "cw.key:⌘B");
+                        self.wait = 6;
+                    }
+                    2 => {
+                        let s = state(app);
+                        self.check(s["bold"] == json!(true), "Format ▸ Bold (after Edit ▸ Select All) bolds the document's text");
+                        app.on_menu(ctx, "cw.key:⌘Z");
+                        self.wait = 6;
+                    }
+                    3 => {
+                        let s = state(app);
+                        self.check(s["bold"] != json!(true), "Edit ▸ Undo undoes it");
+                        if let Some((tab, _)) = Self::tab_of(app, Kind::Pdf) {
+                            app.on_menu(ctx, &format!("cw.tab:{}", tab.0));
+                        }
+                        self.wait = 6;
+                    }
+                    4 => {
+                        self.check(app.tabs.active().map(|t| t.kind) == Some(Kind::Pdf), "Window ▸ (a tab) brings it to the front");
+                        app.on_menu(ctx, "cw.run:page.rotate");
+                        self.wait = 4;
+                    }
+                    5 => {
+                        let dirty = Self::tab_of(app, Kind::Pdf)
+                            .and_then(|(_, d)| app.engine_ref(Kind::Pdf).map(|e| e.editor().documents().iter().any(|i| i.id == d && i.dirty)))
+                            == Some(true);
+                        self.check(dirty, "Document ▸ Rotate Page runs PdfCraft's command");
+                        if let Some((_, doc)) = Self::tab_of(app, Kind::Pdf) {
+                            let _ = app.engine(Kind::Pdf).editor_mut().save(doc);
+                        }
+                        let saved: serde_json::Value = std::fs::read(self.dir.join("settings/session.json"))
+                            .ok()
+                            .and_then(|b| serde_json::from_slice(&b).ok())
+                            .unwrap_or_default();
+                        let n = saved["tabs"].as_array().map_or(0, Vec::len);
+                        self.line(format!("SESSION {saved}"));
+                        self.check(n >= 4, format!("session.json keeps the open tabs' files ({n})"));
+                        self.stage = Stage::Memory { phase: 0 };
+                        return;
+                    }
+                    _ => {}
+                }
+                self.stage = Stage::Menus { phase: phase + 1 };
             }
             Stage::Memory { phase } => {
                 if phase == 0 {
@@ -636,6 +695,75 @@ impl Check {
                 self.idle_frames = app.frames;
             }
             Stage::Idle { started: true, .. } => {}
+            // Quit with unsaved work: only WordCraft's document has changes; the others are saved.
+            Stage::Quit { phase } => {
+                let word_dirty = |app: &App| {
+                    Self::tab_of(app, Kind::Document)
+                        .and_then(|(_, d)| app.engine_ref(Kind::Document).map(|e| e.editor().documents().iter().any(|i| i.id == d && i.dirty)))
+                        == Some(true)
+                };
+                let prompt = |app: &App| app.engine_ref(Kind::Document).is_some_and(|e| e.editor().close_prompt_open());
+                match phase {
+                    0 => {
+                        for kind in [Kind::Sheet, Kind::Presentation, Kind::Pdf] {
+                            let docs: Vec<_> = app.tabs.iter().filter(|t| t.kind == kind).map(|t| t.doc).collect();
+                            for doc in docs {
+                                let ed = app.engine(kind).editor_mut();
+                                if ed.documents().iter().any(|d| d.id == doc && d.dirty) && ed.save(doc).is_err() && ed.activate(doc).is_ok() {
+                                    // Untitled (the memory stage's extras): nothing to lose, close it.
+                                    let _ = ed.run_command("file.close", json!({"force": true}));
+                                }
+                            }
+                        }
+                        let docs: Vec<_> = app.tabs.iter().filter(|t| t.kind == Kind::Document).map(|t| t.doc).collect();
+                        let first = Self::tab_of(app, Kind::Document).map(|(_, d)| d);
+                        for doc in docs.into_iter().filter(|d| Some(*d) != first) {
+                            let ed = app.engine(Kind::Document).editor_mut();
+                            if ed.activate(doc).is_ok() {
+                                let _ = ed.run_command("file.close", json!({"force": true}));
+                            }
+                        }
+                        self.wait = 10;
+                    }
+                    1 => {
+                        if let Some((tab, _)) = Self::tab_of(app, Kind::Document) {
+                            app.tabs.activate(tab);
+                        }
+                        let _ = app.engine(Kind::Document).editor_mut().run_command("text.insert", json!({"text": " Quit test."}));
+                        app.start_quit();
+                        self.wait = 20;
+                    }
+                    2 => {
+                        self.check(prompt(app) && app.quitting.is_some(), "⌘Q with unsaved work shows WordCraft's own Save prompt first");
+                        let _ = app.engine(Kind::Document).editor_mut().run_command("ui.saveChanges", json!({"answer": "cancel"}));
+                        self.wait = 10;
+                    }
+                    3 => {
+                        self.check(
+                            app.quitting.is_none() && !app.quit_confirmed && word_dirty(app),
+                            "Cancel stops the quit and keeps the unsaved edit",
+                        );
+                        app.start_quit();
+                        self.wait = 20;
+                    }
+                    4 => {
+                        let _ = app.engine(Kind::Document).editor_mut().run_command("ui.saveChanges", json!({"answer": "dontSave"}));
+                        self.wait = 20;
+                    }
+                    _ => {
+                        self.check(app.quit_confirmed, "Don't Save lets the quit finish (in the app, AppKit's terminate follows)");
+                        let saved: serde_json::Value = std::fs::read(self.dir.join("settings/session.json"))
+                            .ok()
+                            .and_then(|b| serde_json::from_slice(&b).ok())
+                            .unwrap_or_default();
+                        let n = saved["tabs"].as_array().map_or(0, Vec::len);
+                        self.check(n >= 4, format!("the tabs open at quit are kept for next launch ({n})"));
+                        self.stage = Stage::Report;
+                        return;
+                    }
+                }
+                self.stage = Stage::Quit { phase: phase + 1 };
+            }
             Stage::Report => {
                 let warnings = logger::warnings();
                 self.line(format!("WARNINGS ({}):", warnings.len()));

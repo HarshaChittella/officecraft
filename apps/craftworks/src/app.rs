@@ -2,7 +2,8 @@
 //! toasts) around the four Craft engines, each in an egui context of its own (D1), painted
 //! into a texture by `craftworks-render` and shown below the title row.
 
-use crate::{check, settings, titlebar::TitleBar};
+use crate::menu::{self, MenuCommand};
+use crate::{check, session, settings, titlebar::TitleBar};
 use craftworks_core::engines::new_editor;
 use craftworks_core::{CloseState, DocId, Kind, Opened, TabId, Tabs};
 use craftworks_render::{EngineHost, FrameResult, embed};
@@ -57,6 +58,19 @@ pub struct App {
     shortcut_actions: Vec<keys::Action>,
     /// Documents dropped on the window outside the tab strip, to open in tabs.
     dropped_to_open: Vec<PathBuf>,
+    /// The native menu bar (macOS), and the state it was last built for.
+    native_menu: Option<craft_menu::NativeMenu>,
+    menu_state: u64,
+    /// Quitting: each tab with unsaved changes is asked about in turn (the app's own prompt).
+    pub quitting: Option<HashSet<TabId>>,
+    /// The quit was decided: the next close goes through.
+    pub quit_confirmed: bool,
+    /// The open tabs as last saved to `session.json`.
+    saved_session: Option<session::Session>,
+    /// After a restore: the file whose tab comes to the front once it's open.
+    restore_active: Option<PathBuf>,
+    #[cfg(target_os = "macos")]
+    apple: Option<fmv_macos_events::Inbox>,
     /// `--check`: whether the window counts as focused (a user looking at it).
     pub check_focused: bool,
     /// Light or dark: forced (`--appearance`), else the system's.
@@ -103,6 +117,14 @@ impl App {
             document_keys: Vec::new(),
             shortcut_actions: Vec::new(),
             dropped_to_open: Vec::new(),
+            native_menu: None,
+            menu_state: 0,
+            quitting: None,
+            quit_confirmed: false,
+            saved_session: None,
+            restore_active: None,
+            #[cfg(target_os = "macos")]
+            apple: None,
             check_focused: true,
             forced_dark,
             dark: None,
@@ -125,6 +147,200 @@ impl App {
     pub fn with_check(mut self, c: check::Check) -> Self {
         self.check = Some(c);
         self
+    }
+
+    #[cfg(target_os = "macos")]
+    pub fn set_apple_events(&mut self, inbox: fmv_macos_events::Inbox) {
+        self.apple = Some(inbox);
+    }
+
+    /// Reopens the tabs open at the last quit. Files that are gone are reported, not fatal.
+    pub fn restore_session(&mut self) {
+        let s = session::load();
+        let (here, gone) = s.split_missing(|p| p.exists());
+        self.restore_active = s.active.and_then(|i| s.files.get(i)).filter(|p| p.exists()).cloned();
+        for p in &here {
+            self.open(p);
+        }
+        if !gone.is_empty() {
+            let names: Vec<String> = gone.iter().map(|p| file_name(p)).collect();
+            self.toasts.error(format!(
+                "Couldn't find {} from last time: {}",
+                if gone.len() == 1 { "a file" } else { "some files" },
+                names.join(", ")
+            ));
+        } else if !here.is_empty() {
+            self.toasts.info(format!("Restored {} tab{}", here.len(), if here.len() == 1 { "" } else { "s" }));
+        }
+    }
+
+    /// The open tabs as the session file keeps them (tabs with a file, in strip order).
+    fn current_session(&self) -> session::Session {
+        let active = self.tabs.active().map(|t| t.id);
+        let mut s = session::Session::default();
+        for t in self.tabs.iter() {
+            let path = self.engines.get(&t.kind).and_then(|e| e.editor().documents().into_iter().find(|d| d.id == t.doc)).and_then(|d| d.path);
+            if let Some(p) = path {
+                if Some(t.id) == active {
+                    s.active = Some(s.files.len());
+                }
+                s.files.push(p);
+            }
+        }
+        for (_, p) in &self.pending_opens {
+            s.files.push(p.clone());
+        }
+        s
+    }
+
+    /// Saves the open tabs when they changed, but not once a quit is under way or decided:
+    /// tabs close as it goes, and the ones open when it started are what comes back.
+    fn save_session_if_changed(&mut self) {
+        if self.quitting.is_some() || self.quit_confirmed {
+            return;
+        }
+        let now = self.current_session();
+        if self.saved_session.as_ref() != Some(&now) {
+            session::save(&now);
+            self.saved_session = Some(now);
+        }
+    }
+
+    /// Quit (⌘Q, the Dock, logging out, the window's close button): the open tabs are kept for
+    /// next time, then each tab with unsaved changes is asked about with its app's own prompt.
+    /// Cancel on any of them stops the quit.
+    pub fn start_quit(&mut self) {
+        if self.quitting.is_none() {
+            let s = self.current_session();
+            session::save(&s);
+            self.saved_session = Some(s);
+            self.quitting = Some(HashSet::new());
+        }
+    }
+
+    /// One step of the quit: ask the next unsaved tab, or, with none left, quit.
+    fn step_quit(&mut self) {
+        let Some(asked) = self.quitting.as_mut() else { return };
+        if !self.closing.is_empty() {
+            return;
+        }
+        let next = self.tabs.iter().find(|t| {
+            !asked.contains(&t.id) && self.engines.get(&t.kind).is_some_and(|e| e.editor().documents().iter().any(|d| d.id == t.doc && d.dirty))
+        });
+        match next.map(|t| t.id) {
+            Some(id) => {
+                asked.insert(id);
+                self.close_tab(id);
+            }
+            None => {
+                self.quitting = None;
+                self.quit_confirmed = true;
+                if self.check.is_none() {
+                    // AppKit's own terminate: closing the window first can crash on macOS
+                    // (craft-quit's notes).
+                    craft_quit::quit();
+                }
+            }
+        }
+    }
+
+    /// Runs a menu command (a click, or a key equivalent the window doesn't otherwise know).
+    pub fn on_menu(&mut self, ctx: &egui::Context, id: &str) {
+        let Some(cmd) = MenuCommand::from_id(id) else {
+            log::warn!("unknown menu command {id}");
+            return;
+        };
+        match cmd {
+            MenuCommand::NewTab => self.newtab.toggle(),
+            MenuCommand::New(Kind::Pdf) => self.choose_file(true),
+            MenuCommand::New(kind) => self.new_document(kind),
+            MenuCommand::Open => self.choose_file(false),
+            MenuCommand::OpenRecent(p) => self.open(&p),
+            MenuCommand::CloseTab => self.shortcut_actions.push(keys::Action::CloseTab),
+            MenuCommand::ReopenClosedTab => self.shortcut_actions.push(keys::Action::ReopenClosedTab),
+            MenuCommand::NextTab => self.shortcut_actions.push(keys::Action::NextTab),
+            MenuCommand::PreviousTab => self.shortcut_actions.push(keys::Action::PreviousTab),
+            MenuCommand::ShowTab(id) => {
+                self.tabs.activate(TabId(id));
+            }
+            MenuCommand::Quit => self.start_quit(),
+            MenuCommand::Key(k) => self.document_keys.extend(menu::key_events(&k)),
+            MenuCommand::Copy => self.document_keys.push(Event::Copy),
+            MenuCommand::Cut => self.document_keys.push(Event::Cut),
+            // eframe answers with a Paste event of the clipboard's text next frame, which the
+            // input hook routes to the document.
+            MenuCommand::Paste => ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+            MenuCommand::Run(id) => {
+                if let Some(kind) = self.tabs.active().map(|t| t.kind)
+                    && let Err(e) = self.engine(kind).editor_mut().run_command(&id, serde_json::json!({}))
+                {
+                    self.toasts.error(format!("{id}: {e}"));
+                }
+            }
+        }
+    }
+
+    pub fn has_native_menu(&self) -> bool {
+        self.native_menu.is_some()
+    }
+
+    /// Installs the native menu bar (macOS); without it (other platforms) there's none yet.
+    fn install_menu(&mut self, ctx: &egui::Context) {
+        #[cfg(target_os = "macos")]
+        {
+            let layout = craft_menu::mac_layout(&self.menu_bar(), &craft_menu::LayoutOptions::new("Craftworks"));
+            self.native_menu = craft_menu::mac::install_with(ctx, &layout.bar, craft_menu::mac::MacOptions::default().window_list(false));
+            if self.native_menu.is_none() {
+                log::warn!("AppKit refused the menu bar");
+            }
+        }
+        #[cfg(not(target_os = "macos"))]
+        let _ = ctx;
+    }
+
+    fn menu_bar(&self) -> craft_menu::MenuBar {
+        let items = self.tab_items();
+        let active = self.tabs.active().map(|t| t.id.0);
+        let state = menu::MenuState {
+            shown: self.tabs.active().map(|t| t.kind),
+            tabs: items.iter().map(|t| menu::TabEntry { id: t.id, label: t.label.clone(), active: Some(t.id) == active }).collect(),
+            recent: self.recent.files().iter().map(|f| f.path.as_path()).collect(),
+            can_reopen: !self.closed.is_empty(),
+        };
+        menu::bar(&state)
+    }
+
+    /// Keeps the menu bar in step (the shown kind, the tabs, recent files), and runs its clicks.
+    fn menu_frame(&mut self, ctx: &egui::Context) {
+        if self.native_menu.is_none() {
+            return;
+        }
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        self.tabs.active().map(|t| (t.kind, t.id)).hash(&mut h);
+        for t in self.tab_items() {
+            (t.id, t.label).hash(&mut h);
+        }
+        self.recent.files().len().hash(&mut h);
+        self.recent.files().first().map(|f| f.path.clone()).hash(&mut h);
+        self.closed.is_empty().hash(&mut h);
+        let state = h.finish();
+        let bar = (state != self.menu_state).then(|| self.menu_bar());
+        let modal = self.tabs.active().and_then(|t| self.engines.get(&t.kind)).is_some_and(|e| e.editor().close_prompt_open());
+        let chrome = self.chrome_has_keyboard(ctx);
+        let Some(native) = self.native_menu.as_mut() else { return };
+        if let Some(bar) = bar {
+            let clashes = native.sync(craft_menu::mac_layout(&bar, &craft_menu::LayoutOptions::new("Craftworks")));
+            for c in clashes {
+                log::debug!("menu shortcut clash: {c:?}");
+            }
+            self.menu_state = state;
+        }
+        native.set_gate(craft_menu::Gate { modal, text_editing: chrome, ..Default::default() });
+        let clicks = native.take_clicks(ctx);
+        for c in clicks {
+            self.on_menu(ctx, &c.id);
+        }
     }
 
     /// The engine for `kind`, made on first use and given the window's appearance.
@@ -229,6 +445,9 @@ impl App {
                 }
                 (true, CloseState::Cancelled) => {
                     self.closed.pop();
+                    if self.quitting.take().is_some() {
+                        self.toasts.info("Quit cancelled");
+                    }
                 }
                 _ => still.push(c),
             }
@@ -245,6 +464,16 @@ impl App {
         });
         for (kind, doc) in opened {
             self.tabs.open(kind, doc);
+        }
+        if let Some(want) = self.restore_active.clone() {
+            let found =
+                self.tabs.iter().find(|t| self.engines.get(&t.kind).is_some_and(|e| e.editor().find_path(&want) == Some(t.doc))).map(|t| t.id);
+            if let Some(id) = found {
+                self.tabs.activate(id);
+                self.restore_active = None;
+            } else if self.pending_opens.is_empty() {
+                self.restore_active = None;
+            }
         }
 
         let shown_kind = self.tabs.active().map(|t| t.kind);
@@ -551,6 +780,10 @@ impl eframe::App for App {
     /// else to both. The window's own egui never sees the document's keys, so Tab, arrows and
     /// typing can't move focus in the chrome.
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        // The menu bar's key equivalents come back as the key presses they were.
+        if let Some(native) = self.native_menu.as_mut() {
+            native.raw_input(raw);
+        }
         let chrome_focused = self.chrome_has_keyboard(ctx) || self.tabs.is_empty();
         if !chrome_focused && ctx.egui_wants_keyboard_input() {
             // Focus left on a field that's gone (the popover closed): let it go.
@@ -591,8 +824,32 @@ impl eframe::App for App {
         }
     }
 
+    /// Every frame, also while the window is hidden: Finder's and the Dock's requests, and a
+    /// close request, which becomes a quit that asks about unsaved work first.
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        if let Some(inbox) = &self.apple {
+            for e in inbox.drain() {
+                match e {
+                    fmv_macos_events::Event::Open(paths) => self.dropped_to_open.extend(paths),
+                    fmv_macos_events::Event::Quit => self.start_quit(),
+                }
+            }
+        }
+        if ctx.input(|i| i.viewport().close_requested()) && !self.quit_confirmed {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            self.start_quit();
+            ctx.request_repaint();
+        }
+        // Last, so it sees the CancelClose above (craft-quit's rule).
+        craft_quit::on_close_request(ctx);
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        if self.frames == 0 {
+            self.install_menu(&ctx);
+        }
         self.frames += 1;
         if let Some(mut c) = self.check.take() {
             c.step(self, &ctx);
@@ -607,11 +864,14 @@ impl eframe::App for App {
             self.titlebar_measured = true;
         }
         self.sync_appearance(&ctx);
+        self.menu_frame(&ctx);
         self.shortcuts();
         for p in std::mem::take(&mut self.dropped_to_open) {
             self.open(&p);
         }
         self.sync();
+        self.step_quit();
+        self.save_session_if_changed();
 
         let p = self.palette;
         let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));

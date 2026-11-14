@@ -256,6 +256,32 @@ GridCraft has no input-method handling of its own on the grid. Composition (Japa
 
 After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn't give keyboard focus back to the page: typing is lost until the page is clicked. Reproduced headlessly through `EngineHost` (`input_path::typing_after_cancelling_wordcrafts_save_prompt`, marked ignored until fixed). Our host could refocus WordCraft's canvas by its internal id, but that would reach into the app; this belongs upstream (asking first).
 
+## D32 The menu bar sends keystrokes. SETTLED 2026-11-14
+
+- The menu bar is `craft-menu`'s (as in PdfCraft), so its macOS layout, Window list, Help search and system-key clash rules are shared with the Craft apps.
+- A click on an item that has a shortcut **sends that keystroke to the shown document**, so a click and the key take one path: the app's own handling, its dialogs, its text-field rules. Items without one (Document ▸ Rotate Page) run the app's command by id.
+- Cut, Copy and Paste send egui's clipboard events; Paste asks eframe for the clipboard (`RequestPaste`).
+- Key equivalents come back as key presses (`NativeMenu::raw_input`) and go through the window's routing (D26).
+- The per-kind menu is short on purpose: the common commands, each tested against the app's registry. The ribbon stays the full set.
+- Redo shows each app's own key: ⇧⌘Z in WordCraft and PdfCraft, ⌘Y in GridCraft and DeckCraft.
+
+## D33 Quitting and the session. SETTLED 2026-11-14
+
+- Every way to quit (⌘Q, the Dock, logging out, the window's close button) does three things:
+  1. saves the open tabs' files,
+  2. asks about each unsaved tab in turn with its app's own prompt,
+  3. ends with AppKit's `terminate` (`craft_quit::quit`; closing the window first can crash on macOS, per craft-quit).
+- Cancel stops the quit and the session keeps saving from then on. Once the quit is decided, the session isn't rewritten: the tabs open when it started are what comes back.
+- Untitled documents have no file and aren't restored.
+- Window size and position are eframe's own persisted state.
+
+## D34 App bundle. SETTLED 2026-11-14 (identifier to confirm before Phase 8)
+
+- Bundle id `dev.craftworks.Craftworks` (a placeholder; Phase 8 signing needs the real one).
+- Document types use neutral names (Document, Spreadsheet, Presentation, PDF) and `LSHandlerRank` **Alternate**: Craftworks offers to open these files but never takes over the user's default app.
+- The icon is our own, drawn by `packaging/macos/make_icon.py` at build time. No icon file is committed, so there's no asset row to add.
+- Finder's open-documents and the Dock's Quit arrive through `fmv-macos-events`, the safe wrapper the Craft apps use (MIT OR Apache-2.0).
+
 ## Upstream test results (task 0.6)
 
 Runs on 2026-11-14. Every run is logged under `plan/logs/` (gitignored), one timestamped file per run.

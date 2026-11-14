@@ -25,8 +25,13 @@ log.workspace = true
 serde_json.workspace = true
 pdfcraft-engine.workspace = true
 rfd.workspace = true
+# craft-libs (one revision for all, D16) and the Craft apps' macOS event wrapper.
+craft-menu = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0" }
+craft-keymap = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0", default-features = false }
+craft-quit = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0", features = ["egui"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+fmv-macos-events = "=0.1.0"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }

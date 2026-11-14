@@ -1,6 +1,6 @@
 # Craftworks plan
 
-Status: **approved** 2026-11-14. **Phases 0, 1 and 2 done**, Phase 3 done except its hand checks, 2026-11-14 (decisions D1–D29; D25 look and feel awaits the owner's confirmation).
+Status: **approved** 2026-11-14. **Phases 0–2 and 4 done**, Phase 3 done except its hand checks, 2026-11-14 (decisions D1–D29; D25 look and feel awaits the owner's confirmation).
 **Architecture changed 2026-11-14 (D23): the shell is Rust-only (eframe/winit), not Swift.** Phases 2–8 below are rewritten for it; the look and feel is specified in [design.md](design.md). Phase 2 is next. Xcode is not required.
 Companions: [decisions.md](decisions.md) (open and settled choices), [upstream-patches.md](upstream-patches.md) (hooks we need in the Craft repos).
 
@@ -165,6 +165,19 @@ Tasks
   - Files opened from Finder (Apple Events) arrive through winit and are routed into tabs.
 
 Done when: someone new to the app makes and switches between all four types without seeing a second window; a scripted check of close and quit with unsaved changes never loses edits; double-clicking a `.docx`, `.xlsx`, `.pptx` and `.pdf` in Finder opens each in a tab.
+
+**Result (2026-11-14): done; two things are left to you (below).**
+- **Menu bar** (`craft-menu`, D32):
+  - Craftworks (Quit), File (New Tab, New Document/Sheet/Presentation, Open…, Open Recent, Close Tab, Reopen Closed Tab, Save, Save As…, Print…), Edit (Undo, Redo, Cut, Copy, Paste, Select All, Find…), View (next and previous tab), a menu for the shown kind (Format for documents, sheets and presentations; Document for PDFs), Window (the tabs), and Help.
+  - `--check` clicks through it: Format ▸ Bold then Edit ▸ Undo in WordCraft, Window ▸ a tab, Document ▸ Rotate Page in PdfCraft.
+  - A test checks that every shortcut a menu sends is one the shown app binds.
+- **Quit** (⌘Q, Dock, logout, the close button), D33: the tabs open at that moment are saved, then each tab with unsaved changes gets its app's own prompt. Cancel stops the quit and keeps the edit; Don't Save lets it finish; the process ends with AppKit's `terminate` (craft-quit). `--check` covers Cancel and Don't Save.
+- **Session restore:** `session.json` is saved whenever the tabs change, and restored at a launch without files. Missing files are reported in a toast.
+- **App bundle:** `packaging/macos/bundle.sh` builds `build/Craftworks.app` with document types and UTIs for every format, an icon drawn in code (`make_icon.py`) and an ad-hoc signature. `scripts/finder-open-test.sh` passes 3 of 3: four files sent the way Finder sends them become four tabs; the Dock's Quit ends the app; a relaunch restores the tabs whose files still exist.
+- `--check`: 42 checks, ALL PASS in light and dark. 72 unit and integration tests pass, plus 1 ignored (upstream, D31).
+- **Left to you:**
+  - Making Craftworks the *default* app for these types (Finder ▸ Get Info ▸ Open with ▸ Change All). It's a system setting, so I didn't change it. The bundle declares the types as an Alternate handler, so Open With works now.
+  - A look at the menu bar itself: it's outside the window, so the screenshots can't show it.
 
 ## Phase 5: Services in Rust
 
