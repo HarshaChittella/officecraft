@@ -65,7 +65,13 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             let render = cc.wgpu_render_state.clone().ok_or("Craftworks needs the wgpu renderer")?;
-            let mut app = app::App::new(render, &cc.egui_ctx, forced_dark);
+            // `--check` must not touch the user's clipboard, open panels or print.
+            let platform = if check_dir.is_some() {
+                craftworks_platform::Platform::isolated(std::sync::Arc::new(craftworks_platform::MemoryClipboard::default()))
+            } else {
+                craftworks_platform::Platform::system()
+            };
+            let mut app = app::App::new(render, &cc.egui_ctx, forced_dark, platform);
             #[cfg(target_os = "macos")]
             {
                 let ctx = cc.egui_ctx.clone();

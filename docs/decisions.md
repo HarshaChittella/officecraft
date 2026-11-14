@@ -282,6 +282,23 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 - The icon is our own, drawn by `packaging/macos/make_icon.py` at build time. No icon file is committed, so there's no asset row to add.
 - Finder's open-documents and the Dock's Quit arrive through `fmv-macos-events`, the safe wrapper the Craft apps use (MIT OR Apache-2.0).
 
+## D35 Platform services live in `craftworks-platform`. SETTLED 2026-11-14
+
+- One crate builds each app's `Services` (`craftworks_platform::editor(kind, &platform)`), from crates already in the four apps' dependency set: `objc2-app-kit` (NSPasteboard), `arboard` (pictures), `rfd`, `craft-print`, `image`. No `unsafe` (D24).
+- `Platform::system()` in the app; `Platform::isolated(MemoryClipboard)` for tests and `--check`, which then never touch your clipboard, open a panel or print.
+- The Craft binaries' own `clipboard.rs`/`print.rs` aren't libraries, so they weren't copied: the glue follows each app's documented `Services` contract instead.
+
+## D36 Clipboard ownership is per app. SETTLED 2026-11-14
+
+- Each app asks "is this my copy?" to decide between its rich internal paste and the pasteboard's formats. With one shared pasteboard, a single "we wrote last" flag would make WordCraft think GridCraft's copy was its own.
+- So each app gets an `Owner` holding the pasteboard change count of its own last copy; a copy is "own" only while the count hasn't moved since.
+
+## D37 Links the engines open. SETTLED 2026-11-14
+
+- `file://` links to a document Craftworks opens go to a tab: that's how DeckCraft's Print (export to PDF, then open it) lands in a PDF tab, ready to print.
+- `https`, `http` and `mailto` open in the system (`open --`). Anything else is refused and logged.
+- Real printing isn't verified on this Mac: it has no printer (`lpstat: No destinations added`). Adding a virtual PDF printer is a system change, so it waits for the owner.
+
 ## Upstream test results (task 0.6)
 
 Runs on 2026-11-14. Every run is logged under `plan/logs/` (gitignored), one timestamped file per run.

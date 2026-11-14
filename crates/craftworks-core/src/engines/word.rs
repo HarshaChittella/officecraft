@@ -14,7 +14,12 @@ pub struct WordEditor {
 
 impl WordEditor {
     pub fn new() -> Self {
-        let mut app = WordApp::new(Session::new(wordcraft_doc::Document::new()), Services::default());
+        Self::with_services(Services::default())
+    }
+
+    /// WordCraft with the host's services (clipboard, panels, printing).
+    pub fn with_services(services: Services) -> Self {
+        let mut app = WordApp::new(Session::new(wordcraft_doc::Document::new()), services);
         app.use_one_window();
         WordEditor { app }
     }

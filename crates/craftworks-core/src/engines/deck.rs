@@ -14,7 +14,12 @@ pub struct DeckEditor {
 
 impl DeckEditor {
     pub fn new() -> Self {
-        DeckEditor { app: SlideApp::new(Session::new(), Services::default()) }
+        Self::with_services(Services::default())
+    }
+
+    /// DeckCraft with the host's services (clipboard, panels).
+    pub fn with_services(services: Services) -> Self {
+        DeckEditor { app: SlideApp::new(Session::new(), services) }
     }
 
     pub fn app(&mut self) -> &mut SlideApp {

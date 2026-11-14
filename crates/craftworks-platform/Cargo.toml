@@ -1,0 +1,33 @@
+[package]
+name = "craftworks-platform"
+description = "The services the Craft apps ask their host for: clipboard, file panels, printing, URLs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+craftworks-core = { path = "../craftworks-core" }
+wordcraft-ui-egui.workspace = true
+gridcraft-ui-egui.workspace = true
+deckcraft-ui-egui.workspace = true
+egui.workspace = true
+log.workspace = true
+image.workspace = true
+rfd.workspace = true
+arboard = { version = "3.6", default-features = false, features = ["image-data"] }
+craft-print = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0" }
+craft-ui = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSPasteboard"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSString", "NSData", "NSArray"] }
+
+[dev-dependencies]
+serde_json.workspace = true
+craftworks-render = { path = "../craftworks-render" }
+
+[lints]
+workspace = true

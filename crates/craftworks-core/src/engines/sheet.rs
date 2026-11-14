@@ -14,7 +14,12 @@ pub struct SheetEditor {
 
 impl SheetEditor {
     pub fn new() -> Self {
-        SheetEditor { app: SheetApp::new(Session::new(), Services::default()) }
+        Self::with_services(Services::default())
+    }
+
+    /// GridCraft with the host's services (clipboard, panels, printing).
+    pub fn with_services(services: Services) -> Self {
+        SheetEditor { app: SheetApp::new(Session::new(), services) }
     }
 
     pub fn app(&mut self) -> &mut SheetApp {

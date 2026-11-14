@@ -1,6 +1,6 @@
 # Craftworks plan
 
-Status: **approved** 2026-11-14. **Phases 0–2 and 4 done**, Phase 3 done except its hand checks, 2026-11-14 (decisions D1–D29; D25 look and feel awaits the owner's confirmation).
+Status: **approved** 2026-11-14. **Phases 0–2, 4 and 5 done**, Phase 3 done except its hand checks (Phase 5: printing on paper unverified, no printer), 2026-11-14 (decisions D1–D29; D25 look and feel awaits the owner's confirmation).
 **Architecture changed 2026-11-14 (D23): the shell is Rust-only (eframe/winit), not Swift.** Phases 2–8 below are rewritten for it; the look and feel is specified in [design.md](design.md). Phase 2 is next. Xcode is not required.
 Companions: [decisions.md](decisions.md) (open and settled choices), [upstream-patches.md](upstream-patches.md) (hooks we need in the Craft repos).
 
@@ -188,6 +188,26 @@ Tasks
 - 5.4 Cross-tab paste tests: a sheet range pasted into a document becomes a table, and document text pasted into a slide keeps formatting. These are automated through `run_command` and the clipboard, then checked once by hand.
 
 Done when: copy and paste between tabs keeps formatting in both test cases, and printing works for all four kinds.
+
+**Result (2026-11-14): done except printing on paper, which this Mac can't show (no printer).**
+- **`crates/craftworks-platform`** (D35): the `Services` for WordCraft, GridCraft and DeckCraft, with no `unsafe`.
+  - Clipboard: the macOS pasteboard through objc2's safe calls (plain text, HTML, RTF, MathML), and `arboard` for pictures. Each app has its own "this is my copy" token, so a copy in one tab is never mistaken for the pasting app's own (D36).
+  - File panels: `rfd`. Printing: `craft-print` on a worker thread. Links: only web, mail and file links open (D37).
+  - PdfCraft keeps its own panels, clipboard and printing (D12).
+- **Cross-tab paste** (5.4), automated twice:
+  - `cargo test -p craftworks-platform --test cross_tab_paste`: a GridCraft range pasted into WordCraft becomes a 3×2 table; bold WordCraft text pasted into DeckCraft becomes a text box with bold runs.
+  - `--check`: ⌘C on a sheet range, then ⌘V in the document tab, gives a table (screenshot `pasted-table-*.png`). The check uses a private clipboard, never yours.
+- **Printing** (5.3): WordCraft and GridCraft hand their PDF to `craft-print`; DeckCraft's Print exports a PDF that opens in a Craftworks PDF tab, where PdfCraft prints it; PdfCraft prints its own. `--check` covers DeckCraft's route. A test covers printer discovery and that a missing printer is an error, not a crash.
+- The WordCraft binary's own clipboard and print modules aren't a library, so instead of copying them (5.1), the glue is written against the `Services` contract each app documents. Asking upstream to move them into a library is still open.
+- `--check`: 45 checks, ALL PASS in light and dark (new: ⌘C/⌘V sheet → document, DeckCraft Print → PDF tab). 80 unit and integration tests pass, plus 1 ignored (upstream, D31). fmt and clippy `-D warnings` clean.
+- The check itself got steadier:
+  - It now asks for its own frames between steps, so a quiet app can't stall it (a run took 5 minutes, or hit the time limit).
+  - It waits 4 seconds of wall time before measuring idle CPU, so new documents finish their first work.
+  - It measures again if the pointer moves over the window during the 10 seconds.
+  - **Open:** in about 1 run in 8, idle CPU in the background lands just over its 1% budget (1.1%) with only a few frames, so something on a worker thread is busy. One run also hung once and the log was lost; it hasn't come back in 10 runs. Both are on the Phase 8 list.
+- **Left to you:**
+  - Printing on paper: `lpstat` lists no printers on this Mac. Either print once on a real printer (⌘P in each kind), or allow me to add a virtual PDF printer (a system change).
+  - ⌘C / ⌘V between two tabs with the real keyboard and your own clipboard (already in docs/phase3-checks.md).
 
 ## Phase 6: Projects
 

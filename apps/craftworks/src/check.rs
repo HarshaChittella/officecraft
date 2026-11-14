@@ -40,6 +40,7 @@ enum Stage {
     Typing { phase: u8 },
     DirtyClose { phase: u8 },
     Routing { phase: u8 },
+    Services { phase: u8 },
     Resize { i: usize, frames: u32 },
     Accessibility { frames: u32 },
     Menus { phase: u8 },
@@ -59,6 +60,13 @@ pub struct Check {
     shot_done: Option<Arc<AtomicBool>>,
     idle: Arc<Mutex<Option<f64>>>,
     idle_frames: u64,
+    /// Pointer and wheel events seen during the idle measurement (someone using the Mac), and
+    /// how many measurements they spoiled.
+    idle_input: u32,
+    idle_retries: u32,
+    /// When the window may start measuring idleness: new documents finish their first work
+    /// (layout, titles) in a few seconds, measured in time, not frames.
+    settle_until: Option<f64>,
     wakes: std::collections::BTreeMap<String, u64>,
     resize_worst: f64,
     /// Mean luminance (0–1) of each tab's engine area, from its screenshot.
@@ -84,6 +92,9 @@ impl Check {
             shot_done: None,
             idle: Arc::new(Mutex::new(None)),
             idle_frames: 0,
+            idle_input: 0,
+            idle_retries: 0,
+            settle_until: None,
             wakes: Default::default(),
             resize_worst: 0.0,
             luminance: Arc::new(Mutex::new(Vec::new())),
@@ -160,6 +171,11 @@ impl Check {
         self.shot_done = Some(done);
     }
 
+    /// Whether the window must be left alone (no frames asked for) while idle CPU is measured.
+    pub fn measuring_idle(&self) -> bool {
+        matches!(self.stage, Stage::Idle { started: true, .. })
+    }
+
     /// One frame of the check. Runs before the app syncs and draws.
     pub fn step(&mut self, app: &mut App, ctx: &egui::Context) {
         if let Stage::Idle { started: true, focused } = self.stage {
@@ -167,11 +183,19 @@ impl Check {
             for r in std::mem::take(&mut app.wake_reasons) {
                 *self.wakes.entry(r).or_default() += 1;
             }
+            self.idle_input += ctx.input(|i| {
+                i.raw
+                    .events
+                    .iter()
+                    .filter(|e| matches!(e, egui::Event::PointerMoved(_) | egui::Event::PointerButton { .. } | egui::Event::MouseWheel { .. }))
+                    .count()
+            }) as u32;
             let result = self.idle.lock().ok().and_then(|mut g| g.take());
             if let Some(pct) = result {
                 let frames = app.frames - self.idle_frames;
                 let what = if focused { "focused, caret blinking in the Document tab" } else { "in the background" };
-                self.line(format!("IDLE CPU over 10 s, window {what}: {pct:.1} %, {frames} frames"));
+                let input = std::mem::take(&mut self.idle_input);
+                self.line(format!("IDLE CPU over 10 s, window {what}: {pct:.1} %, {frames} frames, {input} pointer events"));
                 let mut wakes: Vec<_> = std::mem::take(&mut self.wakes).into_iter().collect();
                 wakes.sort_by_key(|w| std::cmp::Reverse(w.1));
                 for (why, n) in wakes.into_iter().take(4) {
@@ -182,9 +206,16 @@ impl Check {
                     // standalone app does: budgeted, not zero.
                     self.check(pct < 8.0, format!("a focused document with a blinking caret stays light ({pct:.1} % CPU, budget 8 %)"));
                     self.stage = Stage::Quit { phase: 0 };
-                } else {
+                } else if input > 0 && pct >= 1.0 && self.idle_retries < 2 {
                     // macOS still sends mouse moves to a background window under the pointer, and
-                    // each is a frame: a moving mouse here is activity, not idleness.
+                    // each is a frame: someone using the Mac spoiled this measurement. Again.
+                    self.idle_retries += 1;
+                    self.line(format!("INFO the pointer was over the window; measuring again ({}/2)", self.idle_retries));
+                    self.wakes.clear();
+                    self.stage = Stage::Idle { started: false, focused: false };
+                    self.wait = 30;
+                } else {
+                    // A moving mouse here is activity, not idleness.
                     self.check(
                         pct < 1.0,
                         format!("an idle window in the background uses (almost) no CPU ({pct:.1} %; the pointer must stay off the window)"),
@@ -540,12 +571,76 @@ impl Check {
                                 .and_then(|d| d.path)
                         });
                         self.check(back.as_ref().is_some_and(|p| p.ends_with("Pitch deck.pptx")), format!("⌥⌘T reopens it from its file ({back:?})"));
-                        self.stage = Stage::DirtyClose { phase: 0 };
+                        self.stage = Stage::Services { phase: 0 };
                         self.wait = 10;
                         return;
                     }
                 }
                 self.stage = Stage::Routing { phase: phase + 1 };
+            }
+            // Clipboard between tabs (an isolated clipboard: never the user's), and DeckCraft's
+            // Print opening its PDF in a tab.
+            Stage::Services { phase } => {
+                match phase {
+                    0 => {
+                        if let Some((tab, _)) = Self::tab_of(app, Kind::Sheet) {
+                            app.tabs.activate(tab);
+                        }
+                        let _ = app.engine(Kind::Sheet).editor_mut().run_command("selection.set", json!({"range": "A1:B4"}));
+                        self.wait = 6;
+                    }
+                    1 => {
+                        app.inject.push(egui::Event::Copy);
+                        self.wait = 6;
+                    }
+                    2 => {
+                        let html = app.platform.clipboard.html().unwrap_or_default();
+                        self.check(html.to_lowercase().contains("<table"), "⌘C in the sheet puts the range on the clipboard as a table");
+                        if let Some((tab, _)) = Self::tab_of(app, Kind::Document) {
+                            app.tabs.activate(tab);
+                        }
+                        self.wait = 8;
+                    }
+                    3 => {
+                        let text = app.platform.clipboard.text().unwrap_or_default();
+                        app.inject.push(egui::Event::Paste(text));
+                        self.wait = 8;
+                    }
+                    4 => {
+                        let inspect = app.engine(Kind::Document).editor_mut().run_command("document.inspect", json!({})).unwrap_or_default();
+                        let table = inspect["blocks"].as_array().and_then(|b| b.iter().find(|x| x["type"] == json!("table"))).cloned();
+                        self.check(
+                            table.as_ref().is_some_and(|t| t["cells"].to_string().contains("North")),
+                            format!("⌘V in the document makes it a table ({:?})", table.map(|t| t["cells"].clone())),
+                        );
+                        self.screenshot(ctx, "pasted-table");
+                        if let Some((tab, _)) = Self::tab_of(app, Kind::Presentation) {
+                            app.tabs.activate(tab);
+                        }
+                        self.wait = 6;
+                    }
+                    5 => {
+                        self.tries = app.tabs.iter().filter(|t| t.kind == Kind::Pdf).count() as u32;
+                        let printed = app.engine(Kind::Presentation).editor_mut().run_command("app.print", json!({}));
+                        self.line(format!("INFO DeckCraft app.print: {printed:?}"));
+                        self.wait = 40;
+                    }
+                    _ => {
+                        let pdfs = app.tabs.iter().filter(|t| t.kind == Kind::Pdf).count() as u32;
+                        if pdfs <= self.tries && self.wait == 0 && phase < 30 {
+                            // PdfCraft opens in the background: give it a little longer.
+                            self.stage = Stage::Services { phase: phase + 1 };
+                            self.wait = 20;
+                            return;
+                        }
+                        self.check(pdfs > self.tries, "DeckCraft's Print opens its PDF in a Craftworks PDF tab, ready to print");
+                        self.tries = 0;
+                        self.stage = Stage::DirtyClose { phase: 0 };
+                        self.wait = 5;
+                        return;
+                    }
+                }
+                self.stage = Stage::Services { phase: phase + 1 };
             }
             Stage::Resize { i, frames } => {
                 let Some(size) = SIZES.get(i).copied() else {
@@ -679,6 +774,12 @@ impl Check {
                 }
             }
             Stage::Idle { started: false, focused } => {
+                let now = ctx.input(|i| i.time);
+                let until = *self.settle_until.get_or_insert(now + 4.0);
+                if now < until {
+                    return;
+                }
+                self.settle_until = None;
                 // Ten seconds of nothing, measured from another thread so this one can sleep.
                 let slot = self.idle.clone();
                 let waker = ctx.clone();

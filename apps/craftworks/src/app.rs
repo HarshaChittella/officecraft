@@ -4,7 +4,6 @@
 
 use crate::menu::{self, MenuCommand};
 use crate::{check, session, settings, titlebar::TitleBar};
-use craftworks_core::engines::new_editor;
 use craftworks_core::{CloseState, DocId, Kind, Opened, TabId, Tabs};
 use craftworks_render::{EngineHost, FrameResult, embed};
 use craftworks_shell::keys::{self, Route};
@@ -41,6 +40,8 @@ pub struct ShownFrame {
 
 pub struct App {
     render: egui_wgpu::RenderState,
+    /// Clipboard, file panels, printing: the system's, or isolated under `--check`.
+    pub platform: craftworks_platform::Platform,
     engines: BTreeMap<Kind, EngineHost>,
     textures: HashMap<Kind, (egui::TextureId, [u32; 2])>,
     pub tabs: Tabs,
@@ -96,7 +97,7 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(render: egui_wgpu::RenderState, ctx: &egui::Context, forced_dark: Option<bool>) -> Self {
+    pub fn new(render: egui_wgpu::RenderState, ctx: &egui::Context, forced_dark: Option<bool>, platform: craftworks_platform::Platform) -> Self {
         ctx.set_fonts(tokens::fonts());
         let palette = Palette::for_dark(forced_dark.unwrap_or(false));
         tokens::apply(ctx, &palette);
@@ -104,6 +105,7 @@ impl App {
         ctx.add_plugin(craftworks_render::a11y::Graft::new(a11y.clone()));
         App {
             render,
+            platform,
             engines: BTreeMap::new(),
             textures: HashMap::new(),
             tabs: Tabs::new(),
@@ -346,8 +348,9 @@ impl App {
     /// The engine for `kind`, made on first use and given the window's appearance.
     pub fn engine(&mut self, kind: Kind) -> &mut EngineHost {
         let (device, format, dark) = (&self.render.device, self.render.target_format, self.dark.unwrap_or(false));
+        let platform = &self.platform;
         self.engines.entry(kind).or_insert_with(|| {
-            let mut host = EngineHost::new(device, format, new_editor(kind));
+            let mut host = EngineHost::new(device, format, craftworks_platform::editor(kind, platform));
             host.editor_mut().set_dark(dark);
             host
         })
@@ -648,7 +651,8 @@ impl App {
             }
             let busy = host.context().has_requested_repaint();
             if busy {
-                self.wake_reasons.push(format!("{kind:?} (hidden) has work"));
+                let causes = if self.check.is_some() { format!(" {:?}", host.context().repaint_causes().first()) } else { String::new() };
+                self.wake_reasons.push(format!("{kind:?} (hidden) has work{causes}"));
             }
             let every = if busy { BACKGROUND_TICK } else { BACKGROUND_IDLE };
             if host.logic_due(every) {
@@ -708,7 +712,12 @@ impl App {
         let result = self.engine(kind).frame(&device, &queue, input, size_px);
         self.last_frame = ShownFrame { kind: Some(kind), switched, font_atlas_rebuilt: result.font_atlas_rebuilt, cpu: result.cpu };
         if result.repaint_after < Duration::from_secs(1) {
-            self.wake_reasons.push(format!("{kind:?} (shown) repaint after {:?}", result.repaint_after));
+            let cause = if result.repaint_after.is_zero() && self.check.is_some() {
+                format!(" {:?}", self.engine(kind).context().repaint_causes().first())
+            } else {
+                String::new()
+            };
+            self.wake_reasons.push(format!("{kind:?} (shown) repaint after {:?}{cause}", result.repaint_after));
         }
         if switched && result.font_atlas_rebuilt {
             // Fonts the app changed while its tab was hidden (logic-only passes) arrive with its
@@ -737,7 +746,8 @@ impl App {
         }
         ui.painter().image(tex, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE);
         let chrome_focused = self.chrome_has_keyboard(&ctx);
-        forward_output(&ctx, result, rect, chrome_focused);
+        let to_open = forward_output(&ctx, result, rect, chrome_focused);
+        self.dropped_to_open.extend(to_open);
     }
 
     /// Whether the chrome has the keyboard: the new-tab popover is open, or the start page's
@@ -853,6 +863,10 @@ impl eframe::App for App {
         self.frames += 1;
         if let Some(mut c) = self.check.take() {
             c.step(self, &ctx);
+            if !c.measuring_idle() {
+                // The check counts frames; it asks for its own, except while it measures idleness.
+                ctx.request_repaint();
+            }
             self.check = Some(c);
         }
         self.wake_reasons.clear();
@@ -934,14 +948,28 @@ impl eframe::App for App {
 }
 
 /// Hands the engine's output to the window: cursor, clipboard and URL commands, IME position
-/// (only while the document has the keyboard), and when to paint next.
-fn forward_output(ctx: &egui::Context, result: FrameResult, area: Rect, chrome_focused: bool) {
+/// (only while the document has the keyboard), and when to paint next. Links go through
+/// [`route_url`]: files Craftworks opens come back to open in tabs (DeckCraft's Print opens its
+/// PDF), web and mail links open in the system, anything else is refused.
+fn forward_output(ctx: &egui::Context, result: FrameResult, area: Rect, chrome_focused: bool) -> Vec<PathBuf> {
     let p = result.platform;
     if ctx.input(|i| i.pointer.hover_pos()).is_some_and(|pos| area.contains(pos)) {
         ctx.set_cursor_icon(p.cursor_icon);
     }
+    let mut to_open = Vec::new();
+    let mut commands = Vec::with_capacity(p.commands.len());
+    for c in p.commands {
+        match c {
+            egui::OutputCommand::OpenUrl(u) => match route_url(&u.url) {
+                UrlRoute::Tab(path) => to_open.push(path),
+                UrlRoute::System => craftworks_platform::files::open_url(&u.url),
+                UrlRoute::Refuse => log::warn!("refused to open {:?} (only web, mail and file links open)", u.url),
+            },
+            other => commands.push(other),
+        }
+    }
     ctx.output_mut(|o| {
-        o.commands.extend(p.commands);
+        o.commands.extend(commands);
         if let Some(mut ime) = p.ime.filter(|_| !chrome_focused) {
             ime.rect = embed::to_window(ime.rect, area);
             ime.cursor_rect = embed::to_window(ime.cursor_rect, area);
@@ -953,8 +981,64 @@ fn forward_output(ctx: &egui::Context, result: FrameResult, area: Rect, chrome_f
     } else if result.repaint_after < Duration::MAX {
         ctx.request_repaint_after(result.repaint_after);
     }
+    to_open
+}
+
+/// Where a link an app opens goes.
+#[derive(Debug, PartialEq, Eq)]
+enum UrlRoute {
+    /// A file Craftworks opens: a tab.
+    Tab(PathBuf),
+    /// A web, mail or other file link: the system's default app.
+    System,
+    Refuse,
+}
+
+fn route_url(url: &str) -> UrlRoute {
+    if let Some(rest) = url.strip_prefix("file://") {
+        // file:///tmp/a.pdf (and DeckCraft's file:////tmp/…): the path, percent-decoded.
+        let path = PathBuf::from(format!("/{}", percent_decode(rest).trim_start_matches('/')));
+        if craftworks_shell::drops::opens_in_a_tab(&path) {
+            return UrlRoute::Tab(path);
+        }
+    }
+    if craftworks_platform::files::openable(url) { UrlRoute::System } else { UrlRoute::Refuse }
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%'
+            && let Some(hex) = s.get(i + 1..i + 3)
+            && let Ok(v) = u8::from_str_radix(hex, 16)
+        {
+            out.push(v);
+            i += 3;
+            continue;
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn file_name(p: &Path) -> String {
     p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn links_to_documents_open_in_tabs_and_others_are_checked() {
+        assert_eq!(route_url("file:////tmp/Deck%20preview.pdf"), UrlRoute::Tab(PathBuf::from("/tmp/Deck preview.pdf")));
+        assert_eq!(route_url("file:///Users/me/Report.docx"), UrlRoute::Tab(PathBuf::from("/Users/me/Report.docx")));
+        assert_eq!(route_url("https://example.com"), UrlRoute::System);
+        assert_eq!(route_url("file:///tmp/photo.png"), UrlRoute::System);
+        assert_eq!(route_url("javascript:alert(1)"), UrlRoute::Refuse);
+        assert_eq!(route_url("x-apple.systempreferences:com.apple.preference"), UrlRoute::Refuse);
+    }
 }

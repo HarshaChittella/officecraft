@@ -1666,6 +1666,7 @@ dependencies = [
  "craft-menu",
  "craft-quit",
  "craftworks-core",
+ "craftworks-platform",
  "craftworks-render",
  "craftworks-shell",
  "eframe",
@@ -1698,6 +1699,28 @@ dependencies = [
  "serde_json",
  "wordcraft-doc",
  "wordcraft-engine",
+ "wordcraft-ui-egui",
+]
+
+[[package]]
+name = "craftworks-platform"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "craft-print",
+ "craft-ui",
+ "craftworks-core",
+ "craftworks-render",
+ "deckcraft-ui-egui",
+ "egui",
+ "gridcraft-ui-egui",
+ "image",
+ "log",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "rfd",
+ "serde_json",
  "wordcraft-ui-egui",
 ]
 
