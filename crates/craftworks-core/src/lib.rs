@@ -1,7 +1,9 @@
 //! Craftworks core: the shell's view of the four Craft engines.
 //!
-//! Phase 0 stub: it only links the four editors so the workspace proves they build together.
-//! The `Editor` trait, tab model and routing arrive in Phase 1 (docs/PLAN.md).
+//! - [`Kind`]: the four kinds of tab, and routing files to them by extension.
+//! - [`Editor`]: one Craft app instance with all its open documents (docs/decisions.md D2).
+//! - [`Tabs`]: the window's tab strip as data.
+//! - [`engines`]: the [`Editor`] adapters for WordCraft, GridCraft, DeckCraft and PdfCraft.
 #![deny(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -11,7 +13,11 @@
     clippy::unreachable
 )]
 
-pub use deckcraft_ui_egui::SlideApp;
-pub use gridcraft_ui_egui::SheetApp;
-pub use pdfcraft_ui_egui::PdfCraftApp;
-pub use wordcraft_ui_egui::WordApp;
+mod editor;
+pub mod engines;
+mod kind;
+mod tabs;
+
+pub use editor::{CloseState, DocId, DocInfo, Editor, EditorError, Opened, Result};
+pub use kind::Kind;
+pub use tabs::{Tab, TabId, Tabs};

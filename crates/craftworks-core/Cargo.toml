@@ -16,6 +16,10 @@ deckcraft-ui-egui.workspace = true
 deckcraft-engine.workspace = true
 pdfcraft-ui-egui.workspace = true
 pdfcraft-engine.workspace = true
+wordcraft-doc.workspace = true
+egui.workspace = true
+serde_json.workspace = true
+log.workspace = true
 
 [lints]
 workspace = true

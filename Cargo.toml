@@ -20,6 +20,11 @@ deckcraft-ui-egui = { path = "vendor/deckcraft/crates/ui-egui" }
 deckcraft-engine = { path = "vendor/deckcraft/crates/engine" }
 pdfcraft-ui-egui = { path = "vendor/pdfcraft/crates/ui-egui" }
 pdfcraft-engine = { path = "vendor/pdfcraft/crates/engine" }
+wordcraft-doc = { path = "vendor/wordcraft/crates/doc" }
+# Third-party crates already in the Craft apps' graph (same versions).
+egui = "0.37"
+serde_json = "1"
+log = "0.4"
 
 # Same lints as the Craft repos (AGENTS.md "Never crash"). craftworks-ffi and one module of
 # craftworks-render are the only places allowed `unsafe` (docs/decisions.md D9).

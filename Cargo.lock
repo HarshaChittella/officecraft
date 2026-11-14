@@ -1663,10 +1663,14 @@ version = "0.1.0"
 dependencies = [
  "deckcraft-engine",
  "deckcraft-ui-egui",
+ "egui",
  "gridcraft-engine",
  "gridcraft-ui-egui",
+ "log",
  "pdfcraft-engine",
  "pdfcraft-ui-egui",
+ "serde_json",
+ "wordcraft-doc",
  "wordcraft-engine",
  "wordcraft-ui-egui",
 ]
