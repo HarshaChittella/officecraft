@@ -214,7 +214,7 @@ With no FFI and no raw `CAMetalLayer` pointer, every crate keeps the workspace's
 
 To be confirmed on the Phase 2 screenshots.
 
-## D26 Window shortcuts. PROPOSED 2026-11-14 (⌘T needs the owner's call)
+## D26 Window shortcuts. SETTLED 2026-11-14: ⌘T opens tabs (owner's decision)
 
 The shell takes ⌘T (new tab, per the brief), ⌘W (close tab), ⌘O (open) and ⌃Tab / ⌃⇧Tab. The apps' own bindings for these keys:
 
@@ -224,7 +224,7 @@ The shell takes ⌘T (new tab, per the brief), ⌘W (close tab), ⌘O (open) and
 | ⌘T | WordCraft hanging indent (`para.hangingIndent`-style), GridCraft Insert Table, a DeckCraft Format command | those commands lose their shortcut; they stay on the ribbon |
 | ⌘⇧T, ⌘1…9 | WordCraft and GridCraft formatting (line spacing, Format Cells…) | **not taken**: "reopen closed tab" and "go to tab N" need other keys |
 
-Phase 3 makes this a table with a test that fails on any collision.
+The owner chose ⌘T for new tabs, so WordCraft's, GridCraft's and DeckCraft's ⌘T commands stay reachable from their ribbons only. Phase 3 makes this a table, with a test that fails on any collision not listed here as intended.
 
 ## D27 One appearance: the window's mode is the engines' "system" mode. SETTLED 2026-11-14
 

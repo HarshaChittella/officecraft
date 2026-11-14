@@ -1,6 +1,6 @@
 # Craftworks plan
 
-Status: **approved** 2026-11-14. **Phases 0, 1 and 2 done** 2026-11-14 (decisions D1–D29; D25 look and feel and D26 ⌘T await the owner's confirmation).
+Status: **approved** 2026-11-14. **Phases 0, 1 and 2 done** 2026-11-14 (decisions D1–D29; D25 look and feel awaits the owner's confirmation).
 **Architecture changed 2026-11-14 (D23): the shell is Rust-only (eframe/winit), not Swift.** Phases 2–8 below are rewritten for it; the look and feel is specified in [design.md](design.md). Phase 2 is next. Xcode is not required.
 Companions: [decisions.md](decisions.md) (open and settled choices), [upstream-patches.md](upstream-patches.md) (hooks we need in the Craft repos).
 
@@ -129,7 +129,7 @@ Done when:
 - Accessibility spike (D28): the window's tree has our chrome with GridCraft's ribbon grafted in, 176 nodes.
 - Memory: 120 MB at the start page, about 420 MB with all four engines, 431 MB with 16 documents.
 - Tests: 53 across the workspace (core 23, render 11, shell 18, app 1). clippy `-D warnings` and fmt are clean.
-- Not covered: real keyboard, IME and trackpad from macOS (Phase 3); a 120 Hz display measurement (none attached); ⌘1…9 and ⌘⇧T (D26).
+- Not covered: real keyboard, IME and trackpad from macOS (Phase 3); a 120 Hz display measurement (none attached); keys for reopen-closed-tab and go-to-tab-N (⌘⇧T and ⌘1…9 stay with the apps, D26).
 
 ## Phase 3: Input and keyboard routing
 
