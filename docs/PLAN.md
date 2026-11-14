@@ -1,6 +1,7 @@
 # Craftworks plan
 
-Status: **approved** 2026-11-14 (D1–D22 settled). **Phase 0 done**, **Phase 1 done** 2026-11-14; Phase 2 next (needs Xcode).
+Status: **approved** 2026-11-14 (D1–D25 settled). **Phase 0 done**, **Phase 1 done** 2026-11-14.
+**Architecture changed 2026-11-14 (D23): the shell is Rust-only (eframe/winit), not Swift.** Phases 2–8 below are rewritten for it; the look and feel is specified in [design.md](design.md). Phase 2 is next. Xcode is not required.
 Companions: [decisions.md](decisions.md) (open and settled choices), [upstream-patches.md](upstream-patches.md) (hooks we need in the Craft repos).
 
 This plan turns the brief's §5 into tasks. Each phase lists its tasks, then the checks that must pass before the next phase starts. After every phase: `cargo test`, `cargo clippy --all-targets -- -D warnings`, `xcodebuild build` (from Phase 2), and screenshots where the UI changed.
@@ -35,7 +36,7 @@ Read at HEAD on 2026-11-14: wordcraft `514085c`, gridcraft `c0ee120`, deckcraft 
 ## Before Phase 0
 
 1. Rust: installed 2026-11-14 with the official rustup installer (stable 1.100.0, targets `aarch64-apple-darwin` and `x86_64-apple-darwin`).
-2. Xcode: the owner installs it and runs `xcode-select`. Needed from Phase 2 (`xcodebuild`).
+2. Xcode: **no longer required** (D23). Packaging uses `codesign`, `hdiutil` and `notarytool`, which come with the Command Line Tools, as in the Craft repos. Xcode stays optional for the Metal debugger and Instruments.
 3. Location: `~/src/craftworks` (D10).
 4. Forks: under the owner's GitHub account, added as remote `fork` (D15).
 
@@ -86,84 +87,86 @@ Done when: the harness opens one document of each type in tabs; switching tabs s
 - Core: 20 tests, including 8 that drive the real engines. Render: 7 tests.
 - Not covered yet: real keyboard, mouse and IME from macOS (the scripted input goes through the same path, but it isn't NSEvent), and PDF Save As to a chosen path (D21).
 
-## Phase 2: Rendering bridge
+## Phase 2: The app window and its chrome
+
+The harness becomes the real app, `apps/craftworks`: one eframe/winit window (wgpu) with our chrome around the four engines. The chrome follows [design.md](design.md).
 
 Tasks
-- 2.1 `craftworks-render`:
-  - `Gpu` holds one `wgpu::Instance`, `Adapter`, `Device` and `Queue` for the whole process.
-  - `Surface::from_metal_layer(ptr, size, scale)` uses `SurfaceTargetUnsafe::CoreAnimationLayer`. This module is the only place in the crate allowed `unsafe`, and every block has a `// SAFETY:` comment (D9).
-  - `resize`, `set_scale`; the present mode is `Fifo`, with `desired_maximum_frame_latency = 1`.
-- 2.2 `EngineHost` holds one `egui::Context`, one `Editor` and one `egui_wgpu::Renderer`. `frame(input) -> FrameResult` runs `Context::run_ui`, then tessellates and paints. It returns `PlatformOutput` (cursor, copied text, opened URL, IME rect, AccessKit update), `repaint_delay` and viewport commands, translated into a plain `FrameResult` struct.
-- 2.3 Viewport commands: Title goes to the tab title. `CancelClose`/`Close` feed the close state machine. Drag, Maximize and similar commands are ignored or forwarded to Swift. Extra viewports are embedded as floating in-tab windows (D13). **Every unhandled `ViewportCommand` is logged** with engine, viewport id and command.
-- 2.4 `craftworks-ffi`: a hand-written `extern "C"` API (D8; `unsafe` allowed here, every block with a `// SAFETY:` comment, D9) and a checked-in `craftworks.h`. A test parses the header and compares it with the exported symbols. API:
-  - `cw_host_new(kind)`, `cw_host_free`
-  - `cw_open(host, path) -> doc`, `cw_activate(host, doc)`
-  - `cw_attach_layer(host, ptr, w, h, scale)`, `cw_resize`
-  - `cw_frame(host, timestamp) -> CwFrameResult`
-  - `cw_event(host, *const CwEvent)`
-  - `cw_request_close(host, doc)`, `cw_poll_close`
-  - `cw_set_services(host, *const CwServices)`: a table of C function pointers plus a `void* ctx`
-  - Strings and buffers pass as `(ptr, len)`, and Rust-owned results are freed with `cw_free_*`.
-- 2.5 `scripts/build-rust.sh`: build release staticlibs for `aarch64` and `x86_64`, combine them with `lipo`, and wrap them with the header as `macos/Craftworks/CraftworksCore.xcframework`.
-- 2.6 A minimal `macos/` app: one `NSWindow`, one `EditorView` (an `NSView` backed by a `CAMetalLayer`), WordCraft only. Frames are driven by `NSView.displayLink`.
+- 2.1 `crates/craftworks-shell`: the shell's UI, separate from the engines:
+  - design tokens (colours light and dark, type scale, spacing, radii, motion), and an icon set drawn in code
+  - the tab strip, the new-tab page, the start page and the status toasts.
+  Everything is egui, with no editor code (brief §0).
+- 2.2 The window: `ViewportBuilder` with a full-size content view and a transparent, hidden title bar. **Our tab strip sits in the title-bar row**, beside the traffic lights, which are inset to centre in it. The strip's empty space drags the window, and double-click zooms it (the macOS behaviour). Native window tabbing is off.
+- 2.3 Tab strip:
+  - tabs with the type icon, a title that truncates in the middle, and a dirty dot that becomes × on hover
+  - tabs shrink to fit, then scroll with fades at the edges
+  - drag to reorder (animated), and drag a file onto the strip to open it
+  - middle-click closes; a context menu offers Close / Close Others / Reveal in Finder / Copy Path
+  - hovering a tab shows a tooltip with the full path
+  - shortcuts: ⌘T, ⌘W, ⌘⇧T (reopen the last closed tab), ⌃Tab / ⌃⇧Tab, ⌘1…9.
+- 2.4 New-tab page (⌘T or "+"):
+  - a centred panel with four large cards (New Document, New Sheet, New Presentation, Open PDF) and "Open File…"
+  - recent files with type icon, folder and relative time, filtered as you type
+  - fully usable from the keyboard: arrows, Enter, Esc.
+  - With no tabs open, the same panel is the start page.
+- 2.5 Rendering: the harness's texture path (`craftworks-render`) becomes production code. Each engine paints into its own texture, which the window composites, so a tab switch is a texture swap. The full-window extra blit is measured and kept under 1 ms. Repaint uses each engine's `repaint_delay`, so an idle window draws nothing. Background engines tick at 4 Hz (D4).
+- 2.6 One appearance: the window follows the system's light or dark mode, and each engine is told to use the same mode at startup and whenever it changes. A Document tab never shows dark while a Sheet tab shows light (Phase 1 screenshots show that problem). Each app's theme preference is set through its own option or command. Where one is missing, that's an upstream patch.
+- 2.7 Retina and resize: the scale changes when the window moves between displays; live resize redraws every frame without stutter; frame times are logged at 60 Hz and on a 120 Hz display.
 
-Done when: Swift shows a WordCraft document drawn by Rust; text is sharp at 2× (pixel check of a screenshot); live resize doesn't stutter (frame time logged at 60 Hz and on a 120 Hz display if available); `xcodebuild build` passes.
+Done when:
+- The app opens the start page.
+- One tab of each kind can be made and switched between, with the chrome matching design.md in light and dark. There are screenshots of both.
+- Resizing is smooth, with frame times recorded.
+- An idle window uses no CPU (Activity Monitor shows 0%).
+- The Phase 1 checks still pass, run as `craftworks --check DIR`.
 
-## Phase 3: Input bridge
+## Phase 3: Input and keyboard routing
 
-Tasks
-- 3.1 `EditorView` turns `NSEvent`s into `CwEvent`s:
-  - mouse down, up, moved and dragged, for every button
-  - `scrollWheel` with `hasPreciseScrollingDeltas` (points vs lines) and momentum phases
-  - `magnify` → `Event::Zoom`
-  - keys mapped to `egui::Key` from key codes, so the mapping doesn't depend on keyboard layout, with modifiers: ⌘ → `command`/`mac_cmd`
-  - `flagsChanged`, focus in and out, mouse entered and exited.
-- 3.2 Text through `NSTextInputClient`:
-  - `insertText` → `Event::Text`
-  - `setMarkedText` → `Ime::Preedit`, `unmarkText` → `Ime::Commit`
-  - `firstRect(forCharacterRange:)` uses the IME rect from `PlatformOutput`.
-  - Test manual scripts for Devanagari (Hindi), Japanese Kana–Kanji, emoji picker (⌃⌘Space) and dead keys (⌥E E).
-- 3.3 Menu shortcuts vs editor keys: our menu bar takes ⌘T/⌘W/⌃Tab, and everything else goes to the editor first (`performKeyEquivalent` order is documented in decisions.md).
-- 3.4 Drag and drop: the view takes `fileURL` drags and sends `hovered_files`/`dropped_files`. A drop on a tab of another type opens a new tab (routing 1.4).
-- 3.5 Input tests: a Rust test feeds recorded `CwEvent` scripts into an `EngineHost` and checks engine state (for example: ⌘B makes the selection bold; arrow keys move the GridCraft cell).
-
-Done when: typing, selection, ribbon clicks, ⌘B/⌘Z/⌘S, GridCraft arrow keys, IME composition and dragged-in files all behave as in the standalone apps. Each check is in a checklist in `docs/phase3-checks.md`.
-
-## Phase 4: Swift shell
+The Craft apps' winit fork already handles macOS input (Retina, precise trackpad scroll, pinch, IME through `NSTextInputClient`, dead keys). This phase makes sure all of it reaches the right engine intact.
 
 Tasks
-- 4.1 Window: `NSWindow` with `fullSizeContentView` and a transparent title bar. Our **tab strip sits in the title-bar row** next to the traffic lights. Below it is one `EditorView` per engine (D5); only the active engine's view is shown.
-- 4.2 Tab strip (SwiftUI inside an `NSHostingView`):
-  - type icons drawn by us: blue Document, green Sheet, orange Presentation, red PDF
-  - dirty dot, close button, drag to reorder, middle-click to close
-  - ⌘T, ⌘W, ⌃Tab / ⌃⇧Tab, ⌘1…9
-- 4.3 The "+" chooser (popover): New Document / Sheet / Presentation, Open PDF, Open File…, and Recent (our own list, plus each app's recent files where they expose them).
-- 4.4 Menu bar: File, Edit, View and Window are ours. A Format menu for each engine is built from the engine's command catalogue (`run_command`). Edit's Undo, Redo, Cut, Copy and Paste go to the active editor through its own command ids.
-- 4.5 Session restore: open tabs and active tab go in `~/Library/Application Support/Craftworks/session.json`; files that are missing on relaunch are skipped with a notice.
-- 4.6 Quit: `applicationShouldTerminate` returns `.terminateLater`, then goes through dirty tabs one at a time with the async close flow (finding 9). Cancel stops the quit.
-- 4.7 `Info.plist`: document types and UTIs for every format in brief §1, and `application(_:open:)` routes into tabs.
+- 3.1 Shortcut routing table (`craftworks-shell::keys`): the shell takes only its own shortcuts (2.3, plus ⌘\ for the sidebar and ⌘⇧O for Quick Open), and every other key goes to the active engine. A test loads each app's keymap (`Kind`'s command catalogue) and fails if a shell shortcut collides with an app's.
+- 3.2 IME through the embedding: the engine's `IMEOutput` (owner, generation, rects) reaches the window unchanged except for the offset, and IME events reach the engine. Manual checks: Hindi (Devanagari), Japanese Kana–Kanji, emoji picker (⌃⌘Space), dead keys (⌥E E), in each engine.
+- 3.3 Pointer details: precise versus line scrolling and momentum, pinch → `Zoom`, hover leaving the engine area, drags that start in the engine and end over the tab strip, and the cursor icon.
+- 3.4 Drag and drop: files dropped on a tab or the strip open in tabs (routing 1.4); files dropped on the engine area go to the engine (for example, an image into a document).
+- 3.5 Input tests: recorded event scripts fed into an `EngineHost` (the harness's injection path), checking engine state: ⌘B bolds the selection, ⌘Z undoes, arrow keys move the GridCraft cell, IME preedit then commit inserts text.
 
-Done when: someone new to the app creates and switches between all four types without seeing a second window; a scripted test (XCUITest) of close and quit with unsaved changes never loses edits.
+Done when: typing, selection, ribbon clicks, ⌘B/⌘Z/⌘S, GridCraft arrows, IME composition and dragged-in files behave as in the standalone apps. Each check is ticked in `docs/phase3-checks.md`.
 
-## Phase 5: Services in Swift
+## Phase 4: Menus, session, quit and file associations
 
 Tasks
-- 5.1 `CwServices` implementation: `NSOpenPanel` and `NSSavePanel` as window sheets, async through the inbox for WordCraft, DeckCraft and GridCraft. PdfCraft keeps using `rfd` (D12) until a later upstream patch adds host hooks.
-- 5.2 Pasteboard, with the types each app expects (read from each app's `clipboard.rs` and `pasteboard.rs`, without copying them): text, HTML, RTF, PNG and TIFF images, plus each app's "own clipboard" marker.
-- 5.3 Printing: the app produces PDF bytes, and `PDFDocument` + `NSPrintOperation` print them for all four types.
-- 5.4 `NSWorkspace.open` for URLs; system font loading where the app asks for it (`load_system_fonts`).
-- 5.5 Cross-tab paste tests: a sheet range pasted into a document becomes a table; document text pasted into a slide keeps formatting. These are automated through `run_command` and a fake pasteboard, then checked once by hand.
+- 4.1 Native macOS menu bar through `craft-menu`/`muda` (already used by the Craft apps).
+  - File, Edit, View and Window are ours.
+  - A menu per engine (for example, Format) is built from that engine's command catalogue and rebuilt when the active tab's kind changes.
+  - Edit's Undo, Redo, Cut, Copy and Paste go to the active engine's own commands.
+- 4.2 Session restore: open tabs, their order, the active tab and window geometry go in `~/Library/Application Support/Craftworks/session.json`. Missing files are skipped with a toast.
+- 4.3 Quit (⌘Q, Dock, logout): goes through every tab with unsaved changes one at a time, using each app's own prompt (D20). Cancel stops the quit. Built on `craft-quit` where it fits.
+- 4.4 App bundle and file associations: `packaging/macos/` scripts, modelled on the Craft repos' scripts.
+  - `Info.plist` with document types and UTIs for every format in brief §1, and the app icon.
+  - Files opened from Finder (Apple Events) arrive through winit and are routed into tabs.
 
-Done when: copy and paste between tabs keeps formatting in both test cases, and printing works for all four types.
+Done when: someone new to the app makes and switches between all four types without seeing a second window; a scripted check of close and quit with unsaved changes never loses edits; double-clicking a `.docx`, `.xlsx`, `.pptx` and `.pdf` in Finder opens each in a tab.
+
+## Phase 5: Services in Rust
+
+Tasks
+- 5.1 `crates/craftworks-platform`: the `Services` callbacks each app asks for, built from the same safe crates the Craft binaries use: `arboard` for the clipboard (text, HTML, RTF, images), `rfd` for file panels, `craft-print` for printing, and `NSWorkspace`/`open` for URLs. **No `unsafe`** (D24). Where a binary's own module (`clipboard.rs`, `print.rs`) does what we need, ask upstream to move it into a library crate we can depend on, rather than copying it.
+- 5.2 Pasteboard formats as each app expects them (each app's own "copied from me" marker included), so a copy in one tab pastes with formatting in another.
+- 5.3 Printing for all four kinds: the app produces PDF bytes and `craft-print` prints them.
+- 5.4 Cross-tab paste tests: a sheet range pasted into a document becomes a table, and document text pasted into a slide keeps formatting. These are automated through `run_command` and the clipboard, then checked once by hand.
+
+Done when: copy and paste between tabs keeps formatting in both test cases, and printing works for all four kinds.
 
 ## Phase 6: Projects
 
 Tasks
 - 6.1 `craftworks-core::project`: a folder plus `.craftworks/project.json` (`name`, `pinned`, `ai.instructions`, `ai.permission` = `read` | `edit` | `edit_save`), with a versioned schema and tests.
-- 6.2 Sidebar (SwiftUI `OutlineGroup`):
-  - file tree filtered to supported types
-  - new file in project, rename, Reveal in Finder
-  - an FSEvents watcher (`FSEventStream`) that refreshes the tree.
+- 6.2 Sidebar (`craftworks-shell`, see design.md "Sidebar"):
+  - collapsible with ⌘\\, resizable
+  - project switcher, Pinned and Files sections, and a file tree filtered to supported types with type icons
+  - new file in the project, rename, Reveal in Finder
+  - a file watcher that refreshes the tree (`notify`, if it's already in the Craft graph; otherwise ask first).
 - 6.3 Text index (`craftworks-core::index`): text from each engine's headless reader (Word text, sheet cell values, slide text and notes, PDF text), held in an in-memory inverted index that updates on file changes. No new dependency: this is a simple token index.
 - 6.4 Project search UI: a search field in the sidebar; clicking a result opens the file at the hit where the engine supports it.
 
@@ -181,7 +184,7 @@ Tasks
 - 7.4 Safety:
   - a project-root jail for every path (canonicalise, refuse symlinks that leave the root, like PdfCraft's `--root`)
   - the permissions from `project.json`
-  - Swift **review panel** listing files the AI changed, and nothing is saved until you approve. Documents use WordCraft track changes where available.
+  - a **review panel** in the shell listing files the AI changed; nothing is saved until you approve. Documents use WordCraft track changes where available.
 - 7.5 `apps/craftworks-cli`: `craftworks mcp --project <dir>` and `craftworks open <file>`. Docs give a one-line config for Claude Code (`claude mcp add craftworks -- craftworks mcp --project .`) and a JSON snippet for Claude Desktop.
 - 7.6 End-to-end scripts for the three scenarios in the brief, with fixture files we generate ourselves.
 - 7.7 **Last:** live AI edits to open PDFs: upstream H7 plus a PdfCraft `Live` backend (finding 14, D14).
@@ -190,9 +193,9 @@ Done when: with only this server connected, Claude Code completes the three brie
 
 ## Phase 8: Polish and ship
 
-- 8.1 AccessKit: `accesskit_macos` adapter per `EditorView`, fed by `PlatformOutput.accesskit_update`, with a VoiceOver pass over each engine.
-- 8.2 Dark mode: `NSApp.effectiveAppearance` → each app's theme preference.
-- 8.3 Signing with hardened runtime, notarisation (`notarytool`), Sparkle updates, crash logs. Sparkle is a new dependency (MIT) and needs your approval.
+- 8.1 Accessibility: one AccessKit tree for the window. The shell's nodes, with the active engine's tree grafted under the tab's content node, go to eframe's `accesskit_macos` adapter. Then a VoiceOver pass over the chrome and each engine. (Combining trees from several egui contexts is the main risk here; it's spiked early in Phase 2.)
+- 8.2 Reduced motion, increased contrast and Dynamic Type-like text sizing are respected by the chrome.
+- 8.3 Signing with hardened runtime, notarisation (`notarytool`), updates through `craft-update` (what the Craft apps use; no new dependency), and crash logs.
 - 8.4 `docs/licences.md`, generated from `cargo metadata` plus each repo's `ATTRIBUTION.*`; fail the build on any licence outside the allowlist.
 - 8.5 `.dmg`, then a clean-Mac test on Apple Silicon and Intel.
 
@@ -203,6 +206,6 @@ Done when: a signed, notarised `.dmg` installs and runs on a clean Mac of each a
 ## Risks
 
 - **Upstream churn** of 30–50 commits a day per repo: re-pin once per phase, not continuously, and keep our patches small so they rebase easily.
-- **Hidden eframe dependencies** in the apps (storage, `viewport_output`, `raw_input_hook`, wgpu callbacks such as `egui_wgpu::CallbackTrait` that need the `Renderer`'s callback resources): the Phase 1 harness surfaces these before any FFI work.
+- **Several egui contexts in one window**: AccessKit trees, IME ownership and the cursor have to be merged into the one window. Phase 1 settled input and painting; AccessKit is spiked early in Phase 2.
 - **The apps' own window logic**: quit-when-last-window-closes, macOS menu-bar handling inside the apps (GridCraft `native_menu.rs` lives in its binary, so it's not linked) and the Dock. All of it is turned off or routed through hosted mode.
 - **Compile time**: about 900 crates. Use a shared `CARGO_TARGET_DIR`, `debug = "line-tables-only"`, and avoid workspace-wide `--release` during iteration.

@@ -43,7 +43,7 @@ Each entry has a status: **ASK** (waiting for the owner), **PROPOSED**, or **SET
 - Engines that aren't visible get a **logic-only pass** at 4 Hz: `run_ui` calls only `app.logic(ctx)`, with no `ui()` and no tessellation or paint. Autosave, background jobs and control requests keep running.
 - The visible engine's `logic` also covers its own background documents.
 
-## D5 One `EditorView` per engine, not per tab. SETTLED 2026-11-14 (differs from brief §4.1)
+## D5 One `EditorView` per engine, not per tab. SETTLED 2026-11-14 (differs from brief §4.1). *Under D23: one render texture per engine, the same idea.*
 
 - With D2, an engine draws its active document. A second surface for the same engine would never be visible.
 - Switching between two tabs of the same engine is `activate(doc)` plus one frame, with no layer swap.
@@ -69,7 +69,7 @@ The app's title row (WordCraft, DeckCraft and GridCraft: QAT Save/Undo/Redo, Aut
 - PdfCraft keeps what it's tested on.
 - The brief's block, which forces `6d518fc`, would drop those 4 commits under PdfCraft.
 
-## D8 FFI binding: hand-written C ABI plus a checked-in header. SETTLED 2026-11-14
+## D8 FFI binding: hand-written C ABI plus a checked-in header. SETTLED 2026-11-14 — **superseded by D23 (no FFI)**
 
 - UniFFI and cbindgen are **MPL-2.0**, which is not on the house licence allowlist (F15).
 - swift-bridge (MIT/Apache) would be a new dependency, and its macros are heavy.
@@ -77,7 +77,7 @@ The app's title row (WordCraft, DeckCraft and GridCraft: QAT Save/Undo/Redo, Aut
 - A Rust test keeps the header and the exports in sync.
 - No cbindgen, not even as a dev tool.
 
-## D9 `unsafe` exception for our two crates. SETTLED 2026-11-14
+## D9 `unsafe` exception for our two crates. SETTLED 2026-11-14 — **superseded by D24 (no `unsafe` anywhere)**
 
 - Our workspace keeps `unsafe_code = "forbid"`, except in:
   - `craftworks-ffi` (`extern "C"`, raw pointers from Swift), and
@@ -175,6 +175,45 @@ Debug build, `harness --shots`, Apple Silicon. Resident memory:
 | + 12 more documents (5 each for Word, Sheet, Deck) | 492 MB (+11) |
 
 Font atlas per engine context: Word 8192×64 (2 MB RGBA), the others 8192×32 (1 MB). So a context per engine costs about 5 MB of atlases, small next to the engines themselves. Each atlas is uploaded whole 1–2 times while the engine first starts (fonts install on the frame after `logic`), and **never on a later tab switch** (12 switches checked). The first frame after a switch takes 3.7–6.4 ms of CPU.
+
+## D23 The shell is Rust-only, not Swift. SETTLED 2026-11-14 (owner's decision; changes brief §4.1)
+
+- **Change:** one eframe/winit window (wgpu) in Rust holds our chrome (tabs, new-tab page, sidebar, menus) and the four engines. There is no Swift, no C ABI and no Xcode project.
+- **Why:**
+  - The Craft apps are Rust-only and already handle macOS input (Retina, trackpad, IME, dead keys) through their winit fork.
+  - The Phase 1 harness proved the embedding.
+  - The FFI layer and the NSEvent/NSTextInputClient bridge (old Phases 2–3), the riskiest work, disappear.
+  - It's one language, matching the Craft house rule "Rust only for native Craft apps".
+  - Packaging uses `codesign`, `hdiutil` and `notarytool`, which the Command Line Tools include, as the Craft repos do.
+- **Cost:** the chrome is drawn with egui, not AppKit. [design.md](design.md) sets the bar for a modern, consistent look.
+- **Native where it matters:** the menu bar (`craft-menu`/`muda`), file panels (`rfd`), clipboard (`arboard`), printing (`craft-print`), accessibility (AccessKit through eframe), updates (`craft-update`).
+- **Repo layout now:**
+  - `crates/craftworks-core` (Editor, tabs, routing, projects)
+  - `crates/craftworks-render` (engine contexts and painting)
+  - `crates/craftworks-shell` (chrome UI, design tokens, icons)
+  - `crates/craftworks-platform` (Services)
+  - `crates/craftworks-mcp`
+  - `apps/craftworks` (the app)
+  - `apps/craftworks-cli`
+  - `apps/harness` (kept until Phase 2 replaces it)
+  - `packaging/macos`
+  
+  `craftworks-ffi`, `macos/` and `scripts/build-rust.sh` are dropped.
+- **Superseded:** D8. D5 and D9 are adjusted.
+
+## D24 No `unsafe` anywhere. SETTLED 2026-11-14
+
+With no FFI and no raw `CAMetalLayer` pointer, every crate keeps the workspace's `unsafe_code = "forbid"`. The Craft binaries reach macOS services through safe APIs (`arboard`, `muda`, `rfd`, objc2's safe methods), and so do we. If a platform API ever needs `unsafe`, we ask first.
+
+## D25 Look and feel. PROPOSED 2026-11-14
+
+[design.md](design.md):
+- The tab strip sits in the title row, beside the traffic lights.
+- New-tab and start page with large kind cards and filterable recent files.
+- Tokens for light and dark, Inter type, an icon set drawn in code, calm motion, keyboard first.
+- One appearance across all tabs.
+
+To be confirmed on the Phase 2 screenshots.
 
 ## Upstream test results (task 0.6)
 
