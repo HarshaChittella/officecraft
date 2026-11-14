@@ -69,3 +69,43 @@ egui_system_font_provider = { git = "https://github.com/storytold/egui.git", rev
 eframe = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
 egui_demo_lib = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
 egui_inspection = { git = "https://github.com/storytold/egui.git", rev = "725a39fca940f77149ffbb9c58eef405a16997bc" }
+
+# craft-libs: one revision for every app where it is safe (docs/decisions.md, "craft-libs alignment").
+[patch."https://github.com/storytold/craft-libs"]
+craft-atomic = { path = "vendor/craft-libs/crates/atomic" }
+craft-audio = { path = "vendor/craft-libs/crates/audio" }
+craft-cfb = { path = "vendor/craft-libs/crates/cfb" }
+craft-cms = { path = "vendor/craft-libs/crates/cms" }
+craft-codepage = { path = "vendor/craft-libs/crates/codepage" }
+craft-csv = { path = "vendor/craft-libs/crates/csv" }
+craft-doc-binary = { path = "vendor/craft-libs/crates/doc-binary" }
+craft-docpath = { path = "vendor/craft-libs/crates/docpath" }
+craft-docx = { path = "vendor/craft-libs/crates/docx" }
+craft-drawingml = { path = "vendor/craft-libs/crates/drawingml" }
+craft-flow = { path = "vendor/craft-libs/crates/flow" }
+craft-font-catalog = { path = "vendor/craft-libs/crates/font-catalog" }
+craft-font-store = { path = "vendor/craft-libs/crates/font-store" }
+craft-fonts-build = { path = "vendor/craft-libs/crates/fonts-build" }
+craft-i18n = { path = "vendor/craft-libs/crates/i18n" }
+craft-keymap = { path = "vendor/craft-libs/crates/keymap" }
+craft-math = { path = "vendor/craft-libs/crates/math" }
+craft-media = { path = "vendor/craft-libs/crates/media" }
+craft-menu = { path = "vendor/craft-libs/crates/menu" }
+craft-metafile = { path = "vendor/craft-libs/crates/metafile" }
+craft-offcrypto = { path = "vendor/craft-libs/crates/offcrypto" }
+craft-opc = { path = "vendor/craft-libs/crates/opc" }
+craft-pdf = { path = "vendor/craft-libs/crates/pdf" }
+craft-print = { path = "vendor/craft-libs/crates/print" }
+craft-proof = { path = "vendor/craft-libs/crates/proof" }
+craft-quit = { path = "vendor/craft-libs/crates/quit" }
+craft-rtf = { path = "vendor/craft-libs/crates/rtf" }
+craft-sheet = { path = "vendor/craft-libs/crates/sheet" }
+craft-stream-codecs = { path = "vendor/craft-libs/crates/stream-codecs" }
+craft-ui = { path = "vendor/craft-libs/crates/ui" }
+craft-update = { path = "vendor/craft-libs/crates/update" }
+craft-video = { path = "vendor/craft-libs/crates/video" }
+craft-window = { path = "vendor/craft-libs/crates/window" }
+craft-wordmodel = { path = "vendor/craft-libs/crates/wordmodel" }
+craft-xls = { path = "vendor/craft-libs/crates/xls" }
+craft-xml = { path = "vendor/craft-libs/crates/xml" }
+craft-zip = { path = "vendor/craft-libs/crates/zip" }

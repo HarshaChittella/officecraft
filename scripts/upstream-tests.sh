@@ -28,19 +28,29 @@ done
 overrides+=(--config "patch.crates-io.krilla.git=\"https://github.com/storytold/craft-libs\"")
 overrides+=(--config "patch.crates-io.krilla.rev=\"$krilla_rev\"")
 
+# CW_ALIGN=1: also put every craft-libs crate on our single checkout (vendor/craft-libs), the
+# way the workspace's own patch block does. Reads the crate list from the root Cargo.toml.
+if [ "${CW_ALIGN:-0}" = 1 ]; then
+  while IFS= read -r line; do
+    name="${line%% =*}"
+    path="$(sed -E 's/.*path = "([^"]+)".*/\1/' <<<"$line")"
+    overrides+=(--config "patch.\"https://github.com/storytold/craft-libs\".$name.path=\"$root/$path\"")
+  done < <(sed -n '/^\[patch\."https:\/\/github.com\/storytold\/craft-libs"\]/,/^\[/p' "$root/Cargo.toml" | grep -E '^craft-[a-z-]+ = \{ path')
+fi
+
 repos=("$@")
 [ ${#repos[@]} -eq 0 ] && repos=(pdfcraft wordcraft gridcraft deckcraft)
 
 status=0
 for repo in "${repos[@]}"; do
   dir="$root/vendor/$repo"
-  log="$logs/upstream-test-$repo.log"
+  log="$logs/upstream-test-$repo${CW_ALIGN:+-aligned}.log"
   echo "== $repo → $log"
   (
     cd "$dir" || exit 1
     export CRAFT_FONTS_DIR="$root/vendor/craft-fonts"
     export CRAFT_I18N_DIR="$root/vendor/craft-i18n"
-    export CARGO_TARGET_DIR="$target_root/$repo"
+    export CARGO_TARGET_DIR="$target_root/$repo${CW_ALIGN:+-aligned}"
     # shellcheck disable=SC2086
     cargo test "${overrides[@]}" ${CW_TEST_ARGS:---workspace} --no-fail-fast
   ) >"$log" 2>&1

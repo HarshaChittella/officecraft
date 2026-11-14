@@ -16,3 +16,6 @@
 [submodule "vendor/craft-i18n"]
 	path = vendor/craft-i18n
 	url = https://github.com/storytold/craft-i18n.git
+[submodule "vendor/craft-libs"]
+	path = vendor/craft-libs
+	url = https://github.com/storytold/craft-libs.git
