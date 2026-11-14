@@ -1,6 +1,6 @@
 # Craftworks plan
 
-Status: **approved** 2026-11-14. **Phases 0, 1 and 2 done** 2026-11-14 (decisions D1–D29; D25 look and feel awaits the owner's confirmation).
+Status: **approved** 2026-11-14. **Phases 0, 1 and 2 done**, Phase 3 done except its hand checks, 2026-11-14 (decisions D1–D29; D25 look and feel awaits the owner's confirmation).
 **Architecture changed 2026-11-14 (D23): the shell is Rust-only (eframe/winit), not Swift.** Phases 2–8 below are rewritten for it; the look and feel is specified in [design.md](design.md). Phase 2 is next. Xcode is not required.
 Companions: [decisions.md](decisions.md) (open and settled choices), [upstream-patches.md](upstream-patches.md) (hooks we need in the Craft repos).
 
@@ -143,6 +143,13 @@ Tasks
 - 3.5 Input tests: recorded event scripts fed into an `EngineHost` (the harness's injection path), checking engine state: ⌘B bolds the selection, ⌘Z undoes, arrow keys move the GridCraft cell, IME preedit then commit inserts text.
 
 Done when: typing, selection, ribbon clicks, ⌘B/⌘Z/⌘S, GridCraft arrows, IME composition and dragged-in files behave as in the standalone apps. Each check is ticked in `docs/phase3-checks.md`.
+
+**Result (2026-11-14): the automated part is done; the hand checks wait for a person at the keyboard** ([checklist](phase3-checks.md)).
+- `craftworks --check` reports ALL PASS in light and dark. That includes the new routing stage, which goes through the window's real input hook: typing reaches the document, ⌘T opens the popover and its typing stays out of the document, ⌃Tab, ⌘W, and ⌥⌘T reopening from the file.
+- Input tests drive the real `EngineHost` path: ⌘A/⌘B/⌘Z in WordCraft; Japanese, Hindi, emoji and dead-key input in WordCraft; GridCraft arrows, typing and composition; the caret reported for the input method.
+- Fixed: the window's egui no longer sees the document's keys; a stale focus left by the popover no longer holds the keyboard; wheel and pinch over the tab strip no longer scroll the page; dropped documents open in tabs instead of going to the shown app too.
+- Found upstream: GridCraft composes only in its cell editor (D30); WordCraft leaves focus off the page after its Save prompt (D31).
+- Still to do by hand: the real Hindi and Japanese input sources, the emoji picker, dead keys, the trackpad feel and pinch, cursors, and drags from Finder.
 
 ## Phase 4: Menus, session, quit and file associations
 

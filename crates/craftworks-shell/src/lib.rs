@@ -3,7 +3,9 @@
 //! egui; no editor code lives here.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod drops;
 pub mod icons;
+pub mod keys;
 pub mod newtab;
 pub mod recent;
 pub mod tabs;

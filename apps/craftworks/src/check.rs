@@ -39,6 +39,7 @@ enum Stage {
     Saves,
     Typing { phase: u8 },
     DirtyClose { phase: u8 },
+    Routing { phase: u8 },
     Resize { i: usize, frames: u32 },
     Accessibility { frames: u32 },
     Memory { phase: u8 },
@@ -423,7 +424,7 @@ impl Check {
                         .and_then(|(_, doc)| app.engine_ref(Kind::Sheet).map(|e| e.editor().documents().iter().any(|d| d.id == doc && d.dirty)))
                         == Some(true);
                     self.check(dirty, "arrow keys, typing and Enter reach GridCraft");
-                    self.stage = Stage::DirtyClose { phase: 0 };
+                    self.stage = Stage::Routing { phase: 0 };
                     self.wait = 5;
                 }
             },
@@ -459,6 +460,91 @@ impl Check {
                     self.wait = 10;
                 }
             },
+            // The window's own input path (its raw-input hook), as real keystrokes take it.
+            Stage::Routing { phase } => {
+                let key = |k: egui::Key, m: egui::Modifiers| {
+                    vec![
+                        egui::Event::Key { key: k, physical_key: Some(k), pressed: true, repeat: false, modifiers: m },
+                        egui::Event::Key { key: k, physical_key: Some(k), pressed: false, repeat: false, modifiers: m },
+                    ]
+                };
+                let cmd = egui::Modifiers { mac_cmd: true, command: true, ..Default::default() };
+                let doc_text = |app: &mut App| {
+                    app.engine(Kind::Document).editor_mut().run_command("document.text", json!({})).map(|v| v.to_string()).unwrap_or_default()
+                };
+                let hook = |app: &mut App, events: Vec<egui::Event>| {
+                    let mut raw = egui::RawInput { events, ..Default::default() };
+                    eframe::App::raw_input_hook(app, ctx, &mut raw);
+                };
+                match phase {
+                    0 => {
+                        if let Some((tab, _)) = Self::tab_of(app, Kind::Document) {
+                            app.tabs.activate(tab);
+                        }
+                        self.wait = 10;
+                    }
+                    1 => {
+                        hook(app, vec![egui::Event::Text(" Routed.".into())]);
+                        self.wait = 10;
+                    }
+                    2 => {
+                        let text = doc_text(app);
+                        self.check(text.contains("Routed."), "keys typed into the window reach the shown document");
+                        hook(app, key(egui::Key::T, cmd));
+                        self.wait = 8;
+                    }
+                    3 => {
+                        self.check(app.newtab.open, "⌘T opens the new-tab popover");
+                        let before = doc_text(app);
+                        hook(app, vec![egui::Event::Text("zq".into())]);
+                        self.wait = 5;
+                        self.tries = before.len() as u32;
+                    }
+                    4 => {
+                        let unchanged = doc_text(app).len() as u32 == self.tries;
+                        self.check(unchanged, "while the popover is open, typing stays out of the document");
+                        // Keys for the chrome (Esc here) go to the window's own egui, which this
+                        // stand-in input can't reach; the popover's Esc has its own unit test.
+                        app.newtab.open = false;
+                        self.wait = 5;
+                    }
+                    5 => {
+                        let before = app.tabs.active().map(|t| t.kind);
+                        hook(app, key(egui::Key::Tab, egui::Modifiers::CTRL));
+                        self.wait = 5;
+                        self.tries = before.map_or(9, |k| ORDER.iter().position(|o| *o == k).unwrap_or(9) as u32);
+                    }
+                    6 => {
+                        let now = app.tabs.active().map(|t| t.kind);
+                        self.check(now == Some(Kind::Sheet), format!("⌃Tab moves to the next tab ({now:?})"));
+                        if let Some((tab, _)) = Self::tab_of(app, Kind::Presentation) {
+                            app.tabs.activate(tab);
+                        }
+                        self.wait = 5;
+                    }
+                    7 => {
+                        hook(app, key(egui::Key::W, cmd));
+                        self.wait = 15;
+                    }
+                    8 => {
+                        self.check(Self::tab_of(app, Kind::Presentation).is_none(), "⌘W closes the saved presentation's tab");
+                        hook(app, key(egui::Key::T, egui::Modifiers { alt: true, ..cmd }));
+                        self.wait = 15;
+                    }
+                    _ => {
+                        let back = Self::tab_of(app, Kind::Presentation).and_then(|(_, doc)| {
+                            app.engine_ref(Kind::Presentation)
+                                .and_then(|e| e.editor().documents().into_iter().find(|d| d.id == doc))
+                                .and_then(|d| d.path)
+                        });
+                        self.check(back.as_ref().is_some_and(|p| p.ends_with("Pitch deck.pptx")), format!("⌥⌘T reopens it from its file ({back:?})"));
+                        self.stage = Stage::DirtyClose { phase: 0 };
+                        self.wait = 10;
+                        return;
+                    }
+                }
+                self.stage = Stage::Routing { phase: phase + 1 };
+            }
             Stage::Resize { i, frames } => {
                 let Some(size) = SIZES.get(i).copied() else {
                     self.check(

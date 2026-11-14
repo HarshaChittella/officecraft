@@ -8,7 +8,9 @@ use egui::{Event, Pos2, RawInput, Rect, Vec2, ViewportId, ViewportInfo};
 /// point move by `-area.min`; a press outside the area is the window's own (its tab strip) and
 /// doesn't reach the engine; a pointer leaving the area is `PointerGone` to the engine.
 /// `keep_key` decides which key events the engine gets (the window keeps its own shortcuts).
-pub fn input_for_area(parent: &RawInput, area: Rect, pixels_per_point: f32, keep_key: impl Fn(&Event) -> bool) -> RawInput {
+/// `pointer` is where the pointer was before this frame's events (the window's latest
+/// position), for events that carry none (wheel, pinch).
+pub fn input_for_area(parent: &RawInput, area: Rect, pixels_per_point: f32, pointer: Option<Pos2>, keep_key: impl Fn(&Event) -> bool) -> RawInput {
     let offset = area.min.to_vec2();
     let local = Rect::from_min_size(Pos2::ZERO, area.size());
     let inside = |p: Pos2| area.contains(p);
@@ -34,6 +36,13 @@ pub fn input_for_area(parent: &RawInput, area: Rect, pixels_per_point: f32, keep
             }
             Event::Touch { device_id, id, phase, pos, force } => {
                 events.push(Event::Touch { device_id: *device_id, id: *id, phase: *phase, pos: *pos - offset, force: *force });
+            }
+            // Wheel, pinch and rotate have no position: they belong to the document only while
+            // the pointer is over it (the last move in this frame, else where it last was).
+            Event::MouseWheel { .. } | Event::Zoom(_) | Event::Rotate(_) => {
+                if was_inside.unwrap_or_else(|| pointer.is_some_and(inside)) {
+                    events.push(e.clone());
+                }
             }
             Event::MiddleClickPaste { pos, .. } if !inside(*pos) => {}
             Event::MiddleClickPaste { pos, text } => events.push(Event::MiddleClickPaste { pos: *pos - offset, text: text.clone() }),
@@ -110,7 +119,7 @@ mod tests {
             Event::PointerMoved(pos2(10.0, 50.0)),
             Event::PointerButton { pos: pos2(10.0, 50.0), button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
         ]);
-        let i = input_for_area(&p, area(), 2.0, all);
+        let i = input_for_area(&p, area(), 2.0, None, all);
         assert_eq!(i.events[0], Event::PointerMoved(pos2(10.0, 10.0)));
         assert!(matches!(i.events[1], Event::PointerButton { pos, pressed: true, .. } if pos == pos2(10.0, 10.0)));
         assert_eq!(i.screen_rect, Some(Rect::from_min_size(Pos2::ZERO, vec2(800.0, 600.0))));
@@ -123,7 +132,7 @@ mod tests {
             Event::PointerButton { pos: pos2(10.0, 5.0), button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
             Event::PointerButton { pos: pos2(10.0, 5.0), button: PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE },
         ]);
-        let i = input_for_area(&p, area(), 1.0, all);
+        let i = input_for_area(&p, area(), 1.0, None, all);
         assert_eq!(i.events.len(), 1);
         assert!(matches!(i.events[0], Event::PointerButton { pressed: false, .. }));
     }
@@ -131,15 +140,33 @@ mod tests {
     #[test]
     fn leaving_the_area_is_pointer_gone_once() {
         let p = parent(vec![Event::PointerMoved(pos2(10.0, 50.0)), Event::PointerMoved(pos2(10.0, 5.0)), Event::PointerMoved(pos2(11.0, 5.0))]);
-        let i = input_for_area(&p, area(), 1.0, all);
+        let i = input_for_area(&p, area(), 1.0, None, all);
         assert_eq!(i.events, vec![Event::PointerMoved(pos2(10.0, 10.0)), Event::PointerGone]);
     }
 
     #[test]
     fn the_window_keeps_the_keys_it_asks_for() {
         let p = parent(vec![Event::Text("a".into()), Event::Copy]);
-        let i = input_for_area(&p, area(), 1.0, |e| !matches!(e, Event::Copy));
+        let i = input_for_area(&p, area(), 1.0, None, |e| !matches!(e, Event::Copy));
         assert_eq!(i.events, vec![Event::Text("a".into())]);
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_document_only_while_the_pointer_is_over_it() {
+        let wheel = Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: vec2(0.0, -10.0),
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            modifiers: Modifiers::NONE,
+        };
+        let over_strip = input_for_area(&parent(vec![wheel.clone()]), area(), 1.0, Some(pos2(10.0, 5.0)), all);
+        assert!(over_strip.events.is_empty(), "scrolling the tab strip leaves the page alone");
+        let over_doc = input_for_area(&parent(vec![wheel.clone()]), area(), 1.0, Some(pos2(10.0, 300.0)), all);
+        assert_eq!(over_doc.events.len(), 1);
+        let moved_in =
+            input_for_area(&parent(vec![Event::PointerMoved(pos2(10.0, 300.0)), Event::Zoom(1.1)]), area(), 1.0, Some(pos2(10.0, 5.0)), all);
+        assert_eq!(moved_in.events.len(), 2, "a pinch after moving onto the page is the page's");
     }
 
     #[test]

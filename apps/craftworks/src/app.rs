@@ -6,8 +6,9 @@ use crate::{check, settings, titlebar::TitleBar};
 use craftworks_core::engines::new_editor;
 use craftworks_core::{CloseState, DocId, Kind, Opened, TabId, Tabs};
 use craftworks_render::{EngineHost, FrameResult, embed};
+use craftworks_shell::keys::{self, Route};
 use craftworks_shell::{NewTab, NewTabAction, Palette, Recent, RecentView, TabAction, TabItem, TabStripState, Toasts, tab_strip, tokens};
-use egui::{Event, Key, Rect, Stroke, pos2};
+use egui::{Event, Rect, Stroke, pos2};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -50,6 +51,12 @@ pub struct App {
     pub last_frame: ShownFrame,
     /// Events the check adds to the shown engine's next input (engine coordinates).
     pub inject: Vec<Event>,
+    /// Keyboard events taken out of the window's input for the shown document (keys::route).
+    document_keys: Vec<Event>,
+    /// Window shortcuts pressed since the last frame.
+    shortcut_actions: Vec<keys::Action>,
+    /// Documents dropped on the window outside the tab strip, to open in tabs.
+    dropped_to_open: Vec<PathBuf>,
     /// `--check`: whether the window counts as focused (a user looking at it).
     pub check_focused: bool,
     /// Light or dark: forced (`--appearance`), else the system's.
@@ -93,6 +100,9 @@ impl App {
             drawn: HashSet::new(),
             last_frame: ShownFrame::default(),
             inject: Vec::new(),
+            document_keys: Vec::new(),
+            shortcut_actions: Vec::new(),
+            dropped_to_open: Vec::new(),
             check_focused: true,
             forced_dark,
             dark: None,
@@ -265,6 +275,7 @@ impl App {
         if let Some(tab) = self.tabs.active().copied()
             && let Some(host) = self.engines.get_mut(&tab.kind)
             && host.editor().active() != Some(tab.doc)
+            && host.editor().documents().iter().any(|d| d.id == tab.doc)
             && let Err(e) = host.editor_mut().activate(tab.doc)
         {
             log::warn!("switching to {:?} {:?}: {e}", tab.kind, tab.doc);
@@ -399,7 +410,7 @@ impl App {
 
         // Hidden engines: logic only, often while they have work, else a slow heartbeat.
         let theme = Some(if self.is_dark() { egui::Theme::Dark } else { egui::Theme::Light });
-        let mut quiet = embed::input_for_area(&egui::RawInput { events: Vec::new(), ..window_input.clone() }, rect, ppp, |_| false);
+        let mut quiet = embed::input_for_area(&egui::RawInput { events: Vec::new(), ..window_input.clone() }, rect, ppp, None, |_| false);
         quiet.system_theme = theme;
         let mut next: Option<Duration> = None;
         for (kind, host) in &mut self.engines {
@@ -435,19 +446,27 @@ impl App {
         if a11y_active.unwrap_or(false) {
             self.engine(kind).context().enable_accesskit();
         }
-        let mut input = embed::input_for_area(&window_input, rect, ppp, |e| shortcut(e).is_none() && !self.newtab.open);
+        // Keys reached the window's input hook already and wait in `document_keys`.
+        let pointer = ctx.input(|i| i.pointer.latest_pos());
+        let mut input = embed::input_for_area(&window_input, rect, ppp, pointer, |_| false);
+        // Documents are opened in tabs, never handed to the shown app.
+        input.dropped_files.retain(|f| !craftworks_shell::drops::opens_in_a_tab(f.path()));
+        input.hovered_files.retain(|f| f.path.as_deref().is_none_or(|p| !craftworks_shell::drops::opens_in_a_tab(p)));
+        input.events.append(&mut self.document_keys);
         let engine_root = egui::accesskit_root_id().accesskit_id();
         for e in &mut input.events {
             if let Event::AccessKitActionRequest(req) = e {
                 *req = craftworks_render::a11y::engine_action(req.clone(), engine_root);
             }
         }
-        if (self.check.is_some() && self.check_focused) || !self.inject.is_empty() {
-            // `--check` stands for a user looking at the window: it counts as focused all along
-            // (WordCraft drops a keystroke that arrives in the same frame as focus does).
-            input.focused = true;
+        if self.check.is_some() || !self.inject.is_empty() {
+            // `--check` decides the window's focus itself, whatever app is in front: focused all
+            // along while it stands for a user (WordCraft drops a keystroke that arrives in the
+            // same frame as focus does), unfocused for the background idle measurement.
+            let focused = self.check_focused || !self.inject.is_empty();
+            input.focused = focused;
             if let Some(vp) = input.viewports.get_mut(&egui::ViewportId::ROOT) {
-                vp.focused = Some(true);
+                vp.focused = Some(focused);
             }
             input.events.append(&mut self.inject);
         }
@@ -488,22 +507,38 @@ impl App {
             s.engine = result.platform.accesskit_update.take();
         }
         ui.painter().image(tex, rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE);
-        forward_output(&ctx, result, rect);
+        let chrome_focused = self.chrome_has_keyboard(&ctx);
+        forward_output(&ctx, result, rect, chrome_focused);
     }
 
-    fn shortcuts(&mut self, ctx: &egui::Context) {
-        let actions: Vec<Shortcut> = ctx.input(|i| i.raw.events.iter().filter_map(shortcut).collect());
-        for a in actions {
+    /// Whether the chrome has the keyboard: the new-tab popover is open, or the start page's
+    /// filter field has focus. With tabs open and no popover the chrome has no text field, so
+    /// the keyboard is the document's (a stale focus left by a closed popover doesn't count).
+    fn chrome_has_keyboard(&self, ctx: &egui::Context) -> bool {
+        self.newtab.open || (self.tabs.is_empty() && ctx.egui_wants_keyboard_input())
+    }
+
+    fn shortcuts(&mut self) {
+        for a in std::mem::take(&mut self.shortcut_actions) {
             match a {
-                Shortcut::NewTab => self.newtab.toggle(),
-                Shortcut::CloseTab => {
+                keys::Action::NewTab => self.newtab.toggle(),
+                keys::Action::CloseTab => {
                     if let Some(id) = self.tabs.active().map(|t| t.id) {
                         self.close_tab(id);
                     }
                 }
-                Shortcut::Open => self.choose_file(false),
-                Shortcut::Cycle(n) => {
-                    self.tabs.cycle(n);
+                keys::Action::Open => self.choose_file(false),
+                keys::Action::ReopenClosedTab => match self.closed.pop() {
+                    Some(path) => self.open(&path),
+                    None => {
+                        self.toasts.info("No closed tab to reopen");
+                    }
+                },
+                keys::Action::NextTab => {
+                    self.tabs.cycle(1);
+                }
+                keys::Action::PreviousTab => {
+                    self.tabs.cycle(-1);
                 }
             }
         }
@@ -511,6 +546,51 @@ impl App {
 }
 
 impl eframe::App for App {
+    /// Sorts the window's input before its pass (keys::route): shortcuts to the window,
+    /// keyboard input to the shown document (unless the chrome has the keyboard), everything
+    /// else to both. The window's own egui never sees the document's keys, so Tab, arrows and
+    /// typing can't move focus in the chrome.
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        let chrome_focused = self.chrome_has_keyboard(ctx) || self.tabs.is_empty();
+        if !chrome_focused && ctx.egui_wants_keyboard_input() {
+            // Focus left on a field that's gone (the popover closed): let it go.
+            ctx.memory_mut(|m| m.stop_text_input());
+        }
+        let mut keep = Vec::with_capacity(raw.events.len());
+        for e in std::mem::take(&mut raw.events) {
+            match keys::route(&e, chrome_focused) {
+                Route::Shortcut(Some(a)) => self.shortcut_actions.push(a),
+                Route::Shortcut(None) => {}
+                Route::Document => self.document_keys.push(e),
+                Route::Chrome => keep.push(e),
+                Route::Both => {
+                    if let Event::ModifiersChanged(_) = e {
+                        self.document_keys.push(e.clone());
+                    }
+                    keep.push(e);
+                }
+            }
+        }
+        raw.events = keep;
+
+        // Dropped documents open in tabs: at the drop position when dropped on the tab strip
+        // (the strip handles them), else after the active tab. Other files are the document's.
+        if !raw.dropped_files.is_empty() {
+            let over_strip = ctx.input(|i| i.pointer.latest_pos()).is_some_and(|p| p.y < self.titlebar.height);
+            let mut others = Vec::new();
+            for f in std::mem::take(&mut raw.dropped_files) {
+                let path = f.path().to_path_buf();
+                // Other files are the document's; documents dropped on the strip are the strip's.
+                if over_strip || !craftworks_shell::drops::opens_in_a_tab(&path) {
+                    others.push(f);
+                } else {
+                    self.dropped_to_open.push(path);
+                }
+            }
+            raw.dropped_files = others;
+        }
+    }
+
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.frames += 1;
@@ -527,7 +607,10 @@ impl eframe::App for App {
             self.titlebar_measured = true;
         }
         self.sync_appearance(&ctx);
-        self.shortcuts(&ctx);
+        self.shortcuts();
+        for p in std::mem::take(&mut self.dropped_to_open) {
+            self.open(&p);
+        }
         self.sync();
 
         let p = self.palette;
@@ -590,16 +673,16 @@ impl eframe::App for App {
     }
 }
 
-/// Hands the engine's output to the window: cursor, clipboard and URL commands, IME position,
-/// and when to paint next.
-fn forward_output(ctx: &egui::Context, result: FrameResult, area: Rect) {
+/// Hands the engine's output to the window: cursor, clipboard and URL commands, IME position
+/// (only while the document has the keyboard), and when to paint next.
+fn forward_output(ctx: &egui::Context, result: FrameResult, area: Rect, chrome_focused: bool) {
     let p = result.platform;
     if ctx.input(|i| i.pointer.hover_pos()).is_some_and(|pos| area.contains(pos)) {
         ctx.set_cursor_icon(p.cursor_icon);
     }
     ctx.output_mut(|o| {
         o.commands.extend(p.commands);
-        if let Some(mut ime) = p.ime {
+        if let Some(mut ime) = p.ime.filter(|_| !chrome_focused) {
             ime.rect = embed::to_window(ime.rect, area);
             ime.cursor_rect = embed::to_window(ime.cursor_rect, area);
             o.ime = Some(ime);
@@ -609,27 +692,6 @@ fn forward_output(ctx: &egui::Context, result: FrameResult, area: Rect) {
         ctx.request_repaint();
     } else if result.repaint_after < Duration::MAX {
         ctx.request_repaint_after(result.repaint_after);
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Shortcut {
-    NewTab,
-    CloseTab,
-    Open,
-    Cycle(isize),
-}
-
-/// The window's own shortcuts (decisions.md D26). These keys don't reach the engines.
-fn shortcut(e: &Event) -> Option<Shortcut> {
-    let Event::Key { key, pressed: true, modifiers, .. } = e else { return None };
-    let plain_cmd = modifiers.command && !modifiers.shift && !modifiers.alt && !modifiers.ctrl;
-    match key {
-        Key::T if plain_cmd => Some(Shortcut::NewTab),
-        Key::W if plain_cmd => Some(Shortcut::CloseTab),
-        Key::O if plain_cmd => Some(Shortcut::Open),
-        Key::Tab if modifiers.ctrl => Some(Shortcut::Cycle(if modifiers.shift { -1 } else { 1 })),
-        _ => None,
     }
 }
 

@@ -224,7 +224,11 @@ The shell takes ⌘T (new tab, per the brief), ⌘W (close tab), ⌘O (open) and
 | ⌘T | WordCraft hanging indent (`para.hangingIndent`-style), GridCraft Insert Table, a DeckCraft Format command | those commands lose their shortcut; they stay on the ribbon |
 | ⌘⇧T, ⌘1…9 | WordCraft and GridCraft formatting (line spacing, Format Cells…) | **not taken**: "reopen closed tab" and "go to tab N" need other keys |
 
-The owner chose ⌘T for new tabs, so WordCraft's, GridCraft's and DeckCraft's ⌘T commands stay reachable from their ribbons only. Phase 3 makes this a table, with a test that fails on any collision not listed here as intended.
+The owner chose ⌘T for new tabs, so WordCraft's, GridCraft's and DeckCraft's ⌘T commands (hanging indent, Insert Table, Font dialog) stay reachable from their ribbons only.
+
+Phase 3 made this a table (`craftworks_shell::keys::SHORTCUTS`). A test reads all four apps' registries (`craftworks_core::keymaps`) and fails on any overlap not listed in `keys::INTENDED`. Phase 3 added **⌥⌘T, reopen closed tab**, which no app uses. The test lists the 13 intended overlaps: ⌘T ×3 (above), ⌘W and ⌘O in all four apps (close and open), and ⌃Tab / ⌃⇧Tab in PdfCraft (its next and previous document tab).
+
+Routing: the window's input hook (`App::raw_input_hook`) takes keyboard events out of the window's own egui input. Shortcuts go to the window; everything else goes to the shown document, unless the chrome has the keyboard (the new-tab popover, or the start page's filter). Pointer events go to both.
 
 ## D27 One appearance: the window's mode is the engines' "system" mode. SETTLED 2026-11-14
 
@@ -243,6 +247,14 @@ The owner chose ⌘T for new tabs, so WordCraft's, GridCraft's and DeckCraft's �
 ## D29 WordCraft drops a keystroke that arrives with focus. NOTED 2026-11-14
 
 A `Text` event in the same frame as the window gaining focus is ignored by WordCraft (reproduced headlessly through `EngineHost`; with focus first, typing works). That's upstream behaviour and harmless for users, who focus before typing. `--check` therefore counts the window as focused throughout. Possible upstream issue (asking first).
+
+## D30 GridCraft composes text only in its cell editor. NOTED 2026-11-14
+
+GridCraft has no input-method handling of its own on the grid. Composition (Japanese, Chinese…) works once a cell's editor is open (F2, or a first plain keystroke), not by starting to compose on a selected cell, as Excel allows. Our host passes IME events through unchanged; this is GridCraft's behaviour, the same in its standalone app. Possible upstream issue (asking first).
+
+## D31 WordCraft leaves keyboard focus off the page after its Save prompt. NOTED 2026-11-14
+
+After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn't give keyboard focus back to the page: typing is lost until the page is clicked. Reproduced headlessly through `EngineHost` (`input_path::typing_after_cancelling_wordcrafts_save_prompt`, marked ignored until fixed). Our host could refocus WordCraft's canvas by its internal id, but that would reach into the app; this belongs upstream (asking first).
 
 ## Upstream test results (task 0.6)
 

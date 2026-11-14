@@ -8,6 +8,7 @@
 
 mod editor;
 pub mod engines;
+pub mod keymaps;
 mod kind;
 mod tabs;
 
