@@ -195,7 +195,6 @@ Font atlas per engine context: Word 8192×64 (2 MB RGBA), the others 8192×32 (1
   - `crates/craftworks-mcp`
   - `apps/craftworks` (the app)
   - `apps/craftworks-cli`
-  - `apps/harness` (kept until Phase 2 replaces it)
   - `packaging/macos`
   
   `craftworks-ffi`, `macos/` and `scripts/build-rust.sh` are dropped.
@@ -214,6 +213,36 @@ With no FFI and no raw `CAMetalLayer` pointer, every crate keeps the workspace's
 - One appearance across all tabs.
 
 To be confirmed on the Phase 2 screenshots.
+
+## D26 Window shortcuts. PROPOSED 2026-11-14 (⌘T needs the owner's call)
+
+The shell takes ⌘T (new tab, per the brief), ⌘W (close tab), ⌘O (open) and ⌃Tab / ⌃⇧Tab. The apps' own bindings for these keys:
+
+| Key | Apps' own use | Effect of the shell taking it |
+|---|---|---|
+| ⌘W, ⌘O | close / open: the same meaning | none (the shell goes through each app's own close and open) |
+| ⌘T | WordCraft hanging indent (`para.hangingIndent`-style), GridCraft Insert Table, a DeckCraft Format command | those commands lose their shortcut; they stay on the ribbon |
+| ⌘⇧T, ⌘1…9 | WordCraft and GridCraft formatting (line spacing, Format Cells…) | **not taken**: "reopen closed tab" and "go to tab N" need other keys |
+
+Phase 3 makes this a table with a test that fails on any collision.
+
+## D27 One appearance: the window's mode is the engines' "system" mode. SETTLED 2026-11-14
+
+- Each engine is told the mode explicitly (`Editor::set_dark`: WordCraft `ui.theme`, GridCraft `ui.dark`, DeckCraft `view.dark`, PdfCraft `set_theme_preference`).
+- Each engine's input also reports the window's mode as the system theme, so everything in an app that follows "System", egui's own visuals included, matches. DeckCraft paints its own colours while its egui visuals follow the system; only the second step makes it fully consistent.
+- `--check` judges the result by what's on screen: the mean luminance of each app's title row is ≥ 0.9 in light and about 0.17 in dark.
+
+## D28 Accessibility across contexts: graft in the window's output hook. SETTLED 2026-11-14 (spike done; VoiceOver pass in Phase 8)
+
+- An egui plugin on the window's context (`craftworks_render::a11y::Graft`) appends the shown engine's AccessKit tree to the window's update after the pass, under a "Tab content" node of the chrome.
+- egui node ids are 64-bit hashes, so only egui's fixed root id collides; the engine's root is renamed, and screen-reader actions aimed at it are renamed back.
+- Engines build their trees only while a client listens (the window produced a tree), so it costs nothing otherwise.
+- `--check` turns accessibility on: the merged tree has 176 nodes with our tab list and New tab, and GridCraft's ribbon (Home, Insert…) under the tab content.
+- This needs no egui change, and AccessKit 0.25's subtree feature isn't needed.
+
+## D29 WordCraft drops a keystroke that arrives with focus. NOTED 2026-11-14
+
+A `Text` event in the same frame as the window gaining focus is ignored by WordCraft (reproduced headlessly through `EngineHost`; with focus first, typing works). That's upstream behaviour and harmless for users, who focus before typing. `--check` therefore counts the window as focused throughout. Possible upstream issue (asking first).
 
 ## Upstream test results (task 0.6)
 

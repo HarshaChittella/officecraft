@@ -11,6 +11,7 @@
 //! adds a surface on a `CAMetalLayer`.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod a11y;
 pub mod embed;
 pub mod viewport_policy;
 
@@ -38,6 +39,8 @@ pub struct FrameResult {
     pub cancel_close: bool,
     /// The whole font atlas was uploaded this frame (fonts installed or rebuilt).
     pub font_atlas_rebuilt: bool,
+    /// The app drew nothing this frame, so its previous image stayed on screen.
+    pub kept_last_image: bool,
     /// Time spent in `logic` + `ui` + tessellation + recording the paint.
     pub cpu: Duration,
 }
@@ -53,7 +56,8 @@ struct Target {
 pub struct EngineHost {
     ctx: egui::Context,
     editor: Box<dyn Editor>,
-    renderer: egui_wgpu::Renderer,
+    /// `None` for a headless host (tests): frames run, nothing is painted.
+    renderer: Option<egui_wgpu::Renderer>,
     format: wgpu::TextureFormat,
     target: Option<Target>,
     /// Input that arrived while only `logic` ran: the next full pass gets it.
@@ -67,6 +71,14 @@ pub struct EngineHost {
 impl EngineHost {
     /// A host for `editor` that paints into textures of `format`.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat, editor: Box<dyn Editor>) -> Self {
+        let mut host = Self::headless(editor);
+        host.renderer = Some(egui_wgpu::Renderer::new(device, format, egui_wgpu::RendererOptions::default()));
+        host.format = format;
+        host
+    }
+
+    /// A host that runs frames without painting them (tests).
+    pub fn headless(editor: Box<dyn Editor>) -> Self {
         let ctx = egui::Context::default();
         // Extra windows (View › New Window, presenter view) draw as windows inside the tab
         // until the shell gives them windows of their own (D13).
@@ -74,8 +86,8 @@ impl EngineHost {
         EngineHost {
             ctx,
             editor,
-            renderer: egui_wgpu::Renderer::new(device, format, egui_wgpu::RendererOptions::default()),
-            format,
+            renderer: None,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             target: None,
             pending: egui::RawInput::default(),
             start: now(),
@@ -121,6 +133,15 @@ impl EngineHost {
     /// the app, `logic` and `ui` run in one pass, and the result is painted into a texture of
     /// `size_px` physical pixels. Returns what the window has to act on.
     pub fn frame(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, input: egui::RawInput, size_px: [u32; 2]) -> FrameResult {
+        self.frame_with(Some((device, queue)), input, size_px)
+    }
+
+    /// [`EngineHost::frame`] without painting (a headless host, or no GPU at hand).
+    pub fn frame_headless(&mut self, input: egui::RawInput) -> FrameResult {
+        self.frame_with(None, input, [1, 1])
+    }
+
+    fn frame_with(&mut self, gpu: Option<(&wgpu::Device, &wgpu::Queue)>, input: egui::RawInput, size_px: [u32; 2]) -> FrameResult {
         let t0 = now();
         let mut raw = std::mem::take(&mut self.pending);
         raw.append(input);
@@ -140,18 +161,32 @@ impl EngineHost {
             self.font_rebuilds = self.font_rebuilds.saturating_add(1);
             self.font_atlas = Some(whole.image.size());
         }
-        #[expect(clippy::iter_over_hash_type)] // order doesn't matter: each texture is independent
-        for (id, deltas) in out.textures_delta.set.drain() {
-            for delta in deltas {
-                self.renderer.update_texture(device, queue, id, &delta);
+        match (gpu, self.renderer.as_mut()) {
+            (Some((device, queue)), Some(renderer)) => {
+                #[expect(clippy::iter_over_hash_type)] // order doesn't matter: each texture is independent
+                for (id, deltas) in out.textures_delta.set.drain() {
+                    for delta in deltas {
+                        renderer.update_texture(device, queue, id, &delta);
+                    }
+                }
+                // An app may skip drawing a frame (WordCraft does for two frames after it
+                // reinstalls fonts): keep showing its last image instead of a blank one.
+                let same_size = self.target.as_ref().is_some_and(|t| t.size == [size_px[0].max(1), size_px[1].max(1)]);
+                if out.shapes.is_empty() && same_size {
+                    result.kept_last_image = true;
+                } else {
+                    let jobs = self.ctx.tessellate(std::mem::take(&mut out.shapes), out.pixels_per_point);
+                    let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: size_px, pixels_per_point: out.pixels_per_point };
+                    self.paint(device, queue, &jobs, &screen);
+                }
+                if let Some(renderer) = self.renderer.as_mut() {
+                    #[expect(clippy::iter_over_hash_type)]
+                    for id in out.textures_delta.free.drain() {
+                        renderer.free_texture(&id);
+                    }
+                }
             }
-        }
-        let jobs = self.ctx.tessellate(std::mem::take(&mut out.shapes), out.pixels_per_point);
-        let screen = egui_wgpu::ScreenDescriptor { size_in_pixels: size_px, pixels_per_point: out.pixels_per_point };
-        self.paint(device, queue, &jobs, &screen);
-        #[expect(clippy::iter_over_hash_type)]
-        for id in out.textures_delta.free.drain() {
-            self.renderer.free_texture(&id);
+            _ => out.textures_delta.clear(),
         }
 
         let mut viewport_outputs = std::mem::take(&mut out.viewport_output);
@@ -218,9 +253,9 @@ impl EngineHost {
 
     fn paint(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, jobs: &[egui::ClippedPrimitive], screen: &egui_wgpu::ScreenDescriptor) {
         self.ensure_target(device, screen.size_in_pixels);
-        let Some(target) = &self.target else { return };
+        let (Some(target), Some(renderer)) = (&self.target, self.renderer.as_mut()) else { return };
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("craftworks engine") });
-        let mut buffers = self.renderer.update_buffers(device, queue, &mut encoder, jobs, screen);
+        let mut buffers = renderer.update_buffers(device, queue, &mut encoder, jobs, screen);
         {
             let pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("craftworks engine"),
@@ -235,7 +270,7 @@ impl EngineHost {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.renderer.render(&mut pass.forget_lifetime(), jobs, screen);
+            renderer.render(&mut pass.forget_lifetime(), jobs, screen);
         }
         buffers.push(encoder.finish());
         queue.submit(buffers);

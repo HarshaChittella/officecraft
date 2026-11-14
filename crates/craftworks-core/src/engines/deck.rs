@@ -103,6 +103,12 @@ impl Editor for DeckEditor {
         self.app.dialog.is_some()
     }
 
+    fn set_dark(&mut self, dark: bool) {
+        if let Err(e) = self.app.run("view.dark", json!({"on": dark})) {
+            log::warn!("DeckCraft view.dark: {e}");
+        }
+    }
+
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value> {
         Ok(self.app.run(id, args)?)
     }

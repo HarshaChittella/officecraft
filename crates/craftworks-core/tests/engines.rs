@@ -205,3 +205,80 @@ fn pdfs_open_switch_save_and_close() {
     assert_eq!(ed.close_state(a), CloseState::Closed);
     assert_eq!(ed.documents().len(), 1);
 }
+
+/// One appearance across tabs: every engine draws dark or light as the window asks.
+#[test]
+fn every_engine_follows_the_windows_appearance() {
+    for kind in Kind::ALL {
+        let ctx = egui::Context::default();
+        let mut ed = new_editor(kind);
+        frames(&ctx, ed.as_mut(), 3);
+        for dark in [true, false, true] {
+            ed.set_dark(dark);
+            frames(&ctx, ed.as_mut(), 3);
+            assert_eq!(ctx.global_style().visuals.dark_mode, dark, "{kind:?} asked for dark = {dark}");
+        }
+    }
+}
+
+/// A frame with `events`, from a focused window.
+fn frames_with(ctx: &egui::Context, ed: &mut dyn Editor, events: Vec<egui::Event>) {
+    let mut input = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))),
+        focused: true,
+        events,
+        ..Default::default()
+    };
+    ed.raw_input_hook(ctx, &mut input);
+    let mut out = ctx.run_ui(input, |ui| {
+        ed.logic(ui.ctx());
+        ed.ui(ui);
+    });
+    out.textures_delta.clear();
+}
+
+/// Typed text reaches WordCraft's document after it has been hidden (logic-only passes, D4).
+#[test]
+fn typing_reaches_the_document_after_logic_only_passes() {
+    let ctx = egui::Context::default();
+    let mut ed = new_editor(Kind::Document);
+    frames(&ctx, ed.as_mut(), 3);
+    ed.new_document().unwrap();
+    frames(&ctx, ed.as_mut(), 3);
+    for _ in 0..5 {
+        let raw = egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 900.0))), ..Default::default() };
+        let _ = ctx.run_logic(&raw, |ctx| ed.logic(ctx));
+    }
+    frames(&ctx, ed.as_mut(), 10);
+    frames_with(&ctx, ed.as_mut(), vec![egui::Event::Text(" Typed.".into())]);
+    frames(&ctx, ed.as_mut(), 2);
+    let text = ed.run_command("document.text", json!({})).unwrap().to_string();
+    assert!(text.contains("Typed."), "{text}");
+}
+
+/// Typed text reaches WordCraft's document, also after a theme change and a Save As.
+#[test]
+fn typing_reaches_the_document() {
+    let dir = scratch("typing");
+    for (label, dark, save) in
+        [("plain", None, false), ("after set_dark", Some(false), false), ("after Save As", None, true), ("both", Some(false), true)]
+    {
+        let ctx = egui::Context::default();
+        let mut ed = new_editor(Kind::Document);
+        if let Some(d) = dark {
+            ed.set_dark(d);
+        }
+        frames(&ctx, ed.as_mut(), 3);
+        let doc = ed.new_document().unwrap();
+        frames(&ctx, ed.as_mut(), 3);
+        ed.run_command("text.insert", json!({"text": "Hello."})).unwrap();
+        if save {
+            ed.save_as(doc, &dir.join(format!("{}.docx", label.replace(' ', "-")))).unwrap();
+        }
+        frames(&ctx, ed.as_mut(), 10);
+        frames_with(&ctx, ed.as_mut(), vec![egui::Event::Text(" Typed.".into())]);
+        frames(&ctx, ed.as_mut(), 2);
+        let text = ed.run_command("document.text", json!({})).unwrap().to_string();
+        assert!(text.contains("Typed."), "{label}: {text}");
+    }
+}

@@ -24,8 +24,8 @@ Status: proposed 2026-11-14, for Phase 2. Covers only **our** chrome: the tab st
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Title row, 40 pt:**
-  - The traffic lights sit at the left, vertically centred, with a 78 pt inset.
+- **Title row:** sized to centre the traffic lights, which AppKit draws and which we can't move without `unsafe`. It's twice the lights' measured centre: 32 pt on macOS 27. Tabs are the row's height less 6 pt.
+  - The traffic lights sit at the left; the tabs start the same gap after them (measured, 82 pt here).
   - Tabs follow, then "+".
   - At the right: a sidebar toggle (Phase 6) and an AI status pill (Phase 7).
   - The row's background is the window surface (below). It blends into the app's own title row underneath, separated only by a hairline.
@@ -42,11 +42,11 @@ All chrome colours come from these, defined for light and dark. The contrast pai
 | `surface-hover` | `#E8E8EC` | `#2F2F34` | hovered tab or row |
 | `hairline` | `#00000014` | `#FFFFFF14` | the one line under the title row, card outlines |
 | `text` | `#1D1D21` | `#ECECEF` | titles |
-| `text-muted` | `#6B6B75` | `#9A9AA5` | inactive tab titles, metadata |
+| `text-muted` | `#62626C` | `#9A9AA5` | inactive tab titles, metadata |
 | `accent` | `#4F6BED` | `#7C8CFF` | focus ring, primary button, selection |
 | `doc` | `#3B82F6` | `#60A5FA` | Document kind |
 | `sheet` | `#16A34A` | `#4ADE80` | Sheet kind |
-| `deck` | `#EA7A1E` | `#FB923C` | Presentation kind |
+| `deck` | `#D9650B` | `#FB923C` | Presentation kind |
 | `pdf` | `#DC3545` | `#F87171` | PDF kind |
 | `danger` | `#D92D20` | `#F97066` | destructive actions, errors |
 

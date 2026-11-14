@@ -96,6 +96,11 @@ impl Editor for WordEditor {
         self.app.dialog.is_some()
     }
 
+    fn set_dark(&mut self, dark: bool) {
+        use wordcraft_ui_egui::theme::Appearance;
+        self.app.ui.theme = if dark { Appearance::Dark } else { Appearance::Light };
+    }
+
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value> {
         Ok(self.app.run(id, args)?)
     }

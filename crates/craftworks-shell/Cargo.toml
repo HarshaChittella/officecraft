@@ -1,0 +1,18 @@
+[package]
+name = "craftworks-shell"
+description = "Craftworks' own chrome: design tokens, icons, tab strip, new-tab page, toasts."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+craftworks-core = { path = "../craftworks-core" }
+egui.workspace = true
+serde_json.workspace = true
+chrono.workspace = true
+log.workspace = true
+
+[lints]
+workspace = true

@@ -135,6 +135,9 @@ pub trait Editor {
         }
     }
 
+    /// Draws the app light or dark, as the window is (one appearance across tabs, design.md).
+    fn set_dark(&mut self, dark: bool);
+
     /// Runs one of the app's commands by id, as its ribbon or menu would.
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value>;
 

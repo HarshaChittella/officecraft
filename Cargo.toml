@@ -29,6 +29,7 @@ wgpu = "30"
 rfd = "0.17"
 image = { version = "0.25", default-features = false, features = ["png"] }
 serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 log = "0.4"
 
 # Same lints as the Craft repos (AGENTS.md "Never crash"). craftworks-ffi and one module of
@@ -119,3 +120,10 @@ craft-wordmodel = { path = "vendor/craft-libs/crates/wordmodel" }
 craft-xls = { path = "vendor/craft-libs/crates/xls" }
 craft-xml = { path = "vendor/craft-libs/crates/xml" }
 craft-zip = { path = "vendor/craft-libs/crates/zip" }
+
+# Optimised but quick to build: for measurements (idle CPU, frame times) during development.
+[profile.measure]
+inherits = "release"
+lto = false
+codegen-units = 16
+incremental = true

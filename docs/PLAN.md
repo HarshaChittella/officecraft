@@ -1,6 +1,6 @@
 # Craftworks plan
 
-Status: **approved** 2026-11-14 (D1–D25 settled). **Phase 0 done**, **Phase 1 done** 2026-11-14.
+Status: **approved** 2026-11-14. **Phases 0, 1 and 2 done** 2026-11-14 (decisions D1–D29; D25 look and feel and D26 ⌘T await the owner's confirmation).
 **Architecture changed 2026-11-14 (D23): the shell is Rust-only (eframe/winit), not Swift.** Phases 2–8 below are rewritten for it; the look and feel is specified in [design.md](design.md). Phase 2 is next. Xcode is not required.
 Companions: [decisions.md](decisions.md) (open and settled choices), [upstream-patches.md](upstream-patches.md) (hooks we need in the Craft repos).
 
@@ -119,6 +119,17 @@ Done when:
 - Resizing is smooth, with frame times recorded.
 - An idle window uses no CPU (Activity Monitor shows 0%).
 - The Phase 1 checks still pass, run as `craftworks --check DIR`.
+
+**Result (2026-11-14): all met, light and dark.** `craftworks --check DIR --appearance light|dark` on an optimised build reports ALL PASS, 31 checks each ([light report](screenshots/phase2/report-light.txt), [dark report](screenshots/phase2/report-dark.txt)):
+- Chrome: start page, tab strip in the title row (sized around the traffic lights, 32 pt on macOS 27), ⌘T new-tab popover with cards and filterable recent files, toasts. Screenshots: [start page](screenshots/phase2/start-page-light.png), [new tab](screenshots/phase2/new-tab-light.png), [Document](screenshots/phase2/tab-document-light.png) / [dark](screenshots/phase2/tab-document-dark.png), [Sheet](screenshots/phase2/tab-sheet-light.png) / [dark](screenshots/phase2/tab-sheet-dark.png), [Presentation](screenshots/phase2/tab-presentation-light.png), [PDF](screenshots/phase2/tab-pdf-dark.png), [Save prompt](screenshots/phase2/dirty-close-prompt-dark.png).
+- One appearance: every app's chrome measures light (luminance ≥ 0.90) or dark (≤ 0.18) as the window does (D27).
+- Every Phase 1 check still passes: 12 switches with no font rebuild, edit and save in every tab, typing through the input path, the app's own Save prompt.
+- Resize: 0.8–2.1 ms of engine work per frame at 4 window sizes, at 2×.
+- Idle: 0.2–0.3 % CPU in the background (5 frames in 10 s); 5.1–5.2 % with a focused document, where WordCraft animates its caret's blink. That's under its 8 % budget, but not zero (it isn't zero standalone either).
+- Accessibility spike (D28): the window's tree has our chrome with GridCraft's ribbon grafted in, 176 nodes.
+- Memory: 120 MB at the start page, about 420 MB with all four engines, 431 MB with 16 documents.
+- Tests: 53 across the workspace (core 23, render 11, shell 18, app 1). clippy `-D warnings` and fmt are clean.
+- Not covered: real keyboard, IME and trackpad from macOS (Phase 3); a 120 Hz display measurement (none attached); ⌘1…9 and ⌘⇧T (D26).
 
 ## Phase 3: Input and keyboard routing
 

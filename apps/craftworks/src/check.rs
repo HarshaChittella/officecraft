@@ -1,0 +1,585 @@
+//! `craftworks --check DIR [--appearance light|dark]`: the Phase 1 and Phase 2 acceptance run,
+//! scripted, in the real app.
+//!
+//! 1. The start page with no tabs (screenshot).
+//! 2. One tab of each kind with a little content (each app's own commands), and a PDF made by
+//!    PdfCraft's engine and opened.
+//! 3. One appearance: every engine draws light or dark as the window does.
+//! 4. A screenshot of each tab, and of the new-tab popover.
+//! 5. Twelve tab switches with no font-atlas rebuild (no font flash).
+//! 6. Edit and save in every tab; typing through the input path.
+//! 7. A dirty close shows the app's own Save prompt (screenshot); Cancel keeps the work.
+//! 8. Resize: frame times at several window sizes.
+//! 9. Memory, then idle CPU over 10 s with nothing happening.
+//!
+//! Everything goes to DIR/report.txt, then the window closes.
+
+use crate::{app::App, logger};
+use craftworks_core::{CloseState, DocId, Kind, TabId};
+use serde_json::json;
+use std::fmt::Write as _;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+const ORDER: [Kind; 4] = [Kind::Document, Kind::Sheet, Kind::Presentation, Kind::Pdf];
+const SIZES: [[f32; 2]; 4] = [[1100.0, 760.0], [1600.0, 1000.0], [900.0, 620.0], [1440.0, 920.0]];
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Stage {
+    StartPage { shot: bool },
+    Setup,
+    WaitForPdf,
+    Appearance,
+    Shots { i: usize, shoot: bool },
+    NewTab { shot: bool },
+    NewTabClose,
+    Switches { n: usize, check: bool },
+    Saves,
+    Typing { phase: u8 },
+    DirtyClose { phase: u8 },
+    Resize { i: usize, frames: u32 },
+    Accessibility { frames: u32 },
+    Memory { phase: u8 },
+    Idle { started: bool, focused: bool },
+    Report,
+    Done,
+}
+
+pub struct Check {
+    dir: PathBuf,
+    suffix: &'static str,
+    stage: Stage,
+    wait: u32,
+    tries: u32,
+    shot_done: Option<Arc<AtomicBool>>,
+    idle: Arc<Mutex<Option<f64>>>,
+    idle_frames: u64,
+    wakes: std::collections::BTreeMap<String, u64>,
+    resize_worst: f64,
+    /// Mean luminance (0–1) of each tab's engine area, from its screenshot.
+    luminance: Arc<Mutex<Vec<(Kind, f32)>>>,
+    report: String,
+    failures: Vec<String>,
+}
+
+impl Check {
+    pub fn new(dir: PathBuf, forced_dark: Option<bool>) -> Self {
+        let _ = std::fs::create_dir_all(&dir);
+        let suffix = match forced_dark {
+            Some(true) => "-dark",
+            Some(false) => "-light",
+            None => "",
+        };
+        Check {
+            dir,
+            suffix,
+            stage: Stage::StartPage { shot: false },
+            wait: 40,
+            tries: 0,
+            shot_done: None,
+            idle: Arc::new(Mutex::new(None)),
+            idle_frames: 0,
+            wakes: Default::default(),
+            resize_worst: 0.0,
+            luminance: Arc::new(Mutex::new(Vec::new())),
+            report: String::new(),
+            failures: Vec::new(),
+        }
+    }
+
+    fn line(&mut self, s: impl AsRef<str>) {
+        let _ = writeln!(self.report, "{}", s.as_ref());
+        println!("{}", s.as_ref());
+    }
+
+    fn check(&mut self, ok: bool, what: impl AsRef<str>) {
+        let what = what.as_ref();
+        self.line(format!("{} {what}", if ok { "PASS" } else { "FAIL" }));
+        if !ok {
+            self.failures.push(what.to_string());
+        }
+    }
+
+    fn rss(&mut self, stage: &str) {
+        let kb = ps("rss=").and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
+        self.line(format!("MEM {stage}: {:.0} MB resident", kb as f64 / 1024.0));
+    }
+
+    fn tab_of(app: &App, kind: Kind) -> Option<(TabId, DocId)> {
+        app.tabs.iter().find(|t| t.kind == kind).map(|t| (t.id, t.doc))
+    }
+
+    fn screenshot(&mut self, ctx: &egui::Context, name: &str) {
+        self.screenshot_measuring(ctx, name, None);
+    }
+
+    /// A screenshot; with `measure`, also the mean luminance of `area` (points) for `kind`.
+    fn screenshot_measuring(&mut self, ctx: &egui::Context, name: &str, measure: Option<(Kind, egui::Rect)>) {
+        let path = self.dir.join(format!("{name}{}.png", self.suffix));
+        let done = Arc::new(AtomicBool::new(false));
+        let flag = done.clone();
+        let lum = self.luminance.clone();
+        let ppp = ctx.pixels_per_point();
+        ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot(egui::ScreenshotCallback::new(move |img| {
+            if let Some((kind, area)) = measure {
+                let (w, h) = (img.size[0], img.size[1]);
+                let (x0, y0) = (((area.left() * ppp) as usize).min(w), ((area.top() * ppp) as usize).min(h));
+                let (x1, y1) = (((area.right() * ppp) as usize).min(w), ((area.bottom() * ppp) as usize).min(h));
+                let (mut sum, mut n) = (0.0f64, 0u64);
+                for y in (y0..y1).step_by(4) {
+                    for x in (x0..x1).step_by(4) {
+                        if let Some(c) = img.pixels.get(y * w + x) {
+                            sum += (0.2126 * f64::from(c.r()) + 0.7152 * f64::from(c.g()) + 0.0722 * f64::from(c.b())) / 255.0;
+                            n += 1;
+                        }
+                    }
+                }
+                if n > 0
+                    && let Ok(mut l) = lum.lock()
+                {
+                    l.push((kind, (sum / n as f64) as f32));
+                }
+            }
+            let bytes: Vec<u8> = img.pixels.iter().flat_map(|c| c.to_srgba_unmultiplied()).collect();
+            let saved = u32::try_from(img.size[0])
+                .ok()
+                .zip(u32::try_from(img.size[1]).ok())
+                .and_then(|(w, h)| image::RgbaImage::from_raw(w, h, bytes))
+                .map(|i| i.save(&path));
+            match saved {
+                Some(Ok(())) => println!("SHOT {}", path.display()),
+                other => eprintln!("screenshot {}: {other:?}", path.display()),
+            }
+            flag.store(true, Ordering::SeqCst);
+        })));
+        self.shot_done = Some(done);
+    }
+
+    /// One frame of the check. Runs before the app syncs and draws.
+    pub fn step(&mut self, app: &mut App, ctx: &egui::Context) {
+        if let Stage::Idle { started: true, focused } = self.stage {
+            // Nothing may happen now: no repaint requested, no input. Wait for the result.
+            for r in std::mem::take(&mut app.wake_reasons) {
+                *self.wakes.entry(r).or_default() += 1;
+            }
+            let result = self.idle.lock().ok().and_then(|mut g| g.take());
+            if let Some(pct) = result {
+                let frames = app.frames - self.idle_frames;
+                let what = if focused { "focused, caret blinking in the Document tab" } else { "in the background" };
+                self.line(format!("IDLE CPU over 10 s, window {what}: {pct:.1} %, {frames} frames"));
+                let mut wakes: Vec<_> = std::mem::take(&mut self.wakes).into_iter().collect();
+                wakes.sort_by_key(|w| std::cmp::Reverse(w.1));
+                for (why, n) in wakes.into_iter().take(4) {
+                    self.line(format!("  wake: {why} ×{n}"));
+                }
+                if focused {
+                    // WordCraft animates its caret's blink (a fade over a few frames), as the
+                    // standalone app does: budgeted, not zero.
+                    self.check(pct < 8.0, format!("a focused document with a blinking caret stays light ({pct:.1} % CPU, budget 8 %)"));
+                    self.stage = Stage::Report;
+                } else {
+                    // macOS still sends mouse moves to a background window under the pointer, and
+                    // each is a frame: a moving mouse here is activity, not idleness.
+                    self.check(
+                        pct < 1.0,
+                        format!("an idle window in the background uses (almost) no CPU ({pct:.1} %; the pointer must stay off the window)"),
+                    );
+                    app.check_focused = true;
+                    self.stage = Stage::Idle { started: false, focused: true };
+                    self.wait = 30;
+                }
+                ctx.request_repaint();
+            }
+            return;
+        }
+        ctx.request_repaint();
+        if let Some(done) = &self.shot_done {
+            if !done.load(Ordering::SeqCst) {
+                return;
+            }
+            self.shot_done = None;
+        }
+        if self.wait > 0 {
+            self.wait -= 1;
+            return;
+        }
+        match self.stage {
+            Stage::StartPage { shot } => {
+                if !shot {
+                    self.line(format!("Craftworks Phase 2 check ({})", if app.is_dark() { "dark" } else { "light" }));
+                    self.rss("start page, no engines");
+                    self.check(app.tabs.is_empty(), "the app opens on the start page");
+                    self.screenshot(ctx, "start-page");
+                    self.stage = Stage::StartPage { shot: true };
+                } else {
+                    self.stage = Stage::Setup;
+                }
+            }
+            Stage::Setup => {
+                app.new_document(Kind::Document);
+                let _ = app.engine(Kind::Document).editor_mut().run_command(
+                    "text.insert",
+                    json!({"text": "Q3 report. Revenue grew in every region; the sheet tab has the figures and the deck tells the story."}),
+                );
+                app.new_document(Kind::Sheet);
+                for (cell, input) in [
+                    ("A1", "Region"),
+                    ("B1", "Q3"),
+                    ("A2", "North"),
+                    ("B2", "1200"),
+                    ("A3", "South"),
+                    ("B3", "1350"),
+                    ("A4", "Total"),
+                    ("B4", "=SUM(B2:B3)"),
+                ] {
+                    let _ = app.engine(Kind::Sheet).editor_mut().run_command("cell.set", json!({"cell": cell, "input": input}));
+                }
+                app.new_document(Kind::Presentation);
+                let _ = app.engine(Kind::Presentation).editor_mut().run_command("slide.new", json!({}));
+                let pdf = self.dir.join("Contract.pdf");
+                match pdfcraft_engine::Session::new().create_from_text("Contract", "Services agreement. Payment: 2,550 within 30 days of invoice.") {
+                    Ok(bytes) if std::fs::write(&pdf, bytes.as_slice()).is_ok() => app.open(&pdf),
+                    other => self.check(false, format!("make Contract.pdf: {:?}", other.err())),
+                }
+                self.stage = Stage::WaitForPdf;
+                self.wait = 5;
+            }
+            Stage::WaitForPdf => {
+                self.tries += 1;
+                if Self::tab_of(app, Kind::Pdf).is_some() || self.tries > 600 {
+                    let ok = Self::tab_of(app, Kind::Pdf).is_some();
+                    self.check(ok, "the PDF opened in a tab (it showed as opening meanwhile)");
+                    self.check(app.tabs.len() == 4, format!("four tabs, one per kind (have {})", app.tabs.len()));
+                    self.stage = Stage::Appearance;
+                    self.wait = 10;
+                }
+            }
+            Stage::Appearance => self.stage = Stage::Shots { i: 0, shoot: false },
+            Stage::Shots { i, shoot } => {
+                let Some(kind) = ORDER.get(i).copied() else {
+                    // One appearance: judged from what each app's chrome showed on screen.
+                    let dark = app.is_dark();
+                    let measured = self.luminance.lock().map(|l| l.clone()).unwrap_or_default();
+                    for (kind, l) in measured {
+                        let looks_dark = l < 0.45;
+                        self.check(
+                            looks_dark == dark,
+                            format!("{kind:?} looks {} like the window (mean luminance {l:.2})", if dark { "dark" } else { "light" }),
+                        );
+                    }
+                    self.stage = Stage::NewTab { shot: false };
+                    return;
+                };
+                let Some((tab, _)) = Self::tab_of(app, kind) else {
+                    self.check(false, format!("{kind:?} has a tab"));
+                    self.stage = Stage::Shots { i: i + 1, shoot: false };
+                    return;
+                };
+                if !shoot {
+                    app.tabs.activate(tab);
+                    self.stage = Stage::Shots { i, shoot: true };
+                    self.wait = 60;
+                } else {
+                    let shown = app.last_frame.kind == Some(kind);
+                    self.check(shown, format!("{kind:?} tab shows its engine"));
+                    self.rss(&format!("after {kind:?} shown"));
+                    // The app's own title row (its chrome), not the page: a document page stays
+                    // white in dark mode, as it should.
+                    let r = app.content_rect;
+                    let area = egui::Rect::from_min_max(r.min, egui::pos2(r.right(), r.top() + 28.0));
+                    self.screenshot_measuring(ctx, &format!("tab-{}", kind.label().to_lowercase()), Some((kind, area)));
+                    self.stage = Stage::Shots { i: i + 1, shoot: false };
+                    self.wait = 5;
+                }
+            }
+            Stage::NewTab { shot } => {
+                if !shot {
+                    if let Some((tab, _)) = Self::tab_of(app, Kind::Document) {
+                        app.tabs.activate(tab);
+                    }
+                    app.newtab.show_popover();
+                    self.stage = Stage::NewTab { shot: true };
+                    self.wait = 30;
+                } else {
+                    self.check(app.newtab.open, "⌘T's new-tab popover is open");
+                    self.screenshot(ctx, "new-tab");
+                    self.stage = Stage::NewTabClose;
+                }
+            }
+            Stage::NewTabClose => {
+                app.newtab.open = false;
+                self.stage = Stage::Switches { n: 0, check: false };
+                self.wait = 10;
+            }
+            Stage::Switches { n, check } => {
+                if check {
+                    let f = app.last_frame;
+                    self.line(format!(
+                        "SWITCH {n:2} → {:<12} first frame: font atlas rebuilt = {}, engine cpu {:.1} ms",
+                        format!("{:?}", f.kind.unwrap_or(Kind::Document)),
+                        f.font_atlas_rebuilt,
+                        f.cpu.as_secs_f64() * 1000.0
+                    ));
+                    if f.switched && f.font_atlas_rebuilt {
+                        self.failures.push(format!("font atlas rebuilt on switch {n}"));
+                    }
+                    self.stage = Stage::Switches { n: n + 1, check: false };
+                    self.wait = 8;
+                } else if n < 12 {
+                    app.tabs.cycle(1);
+                    self.stage = Stage::Switches { n, check: true };
+                } else {
+                    let rebuilt = self.failures.iter().filter(|f| f.starts_with("font atlas rebuilt")).count();
+                    self.check(rebuilt == 0, "no font atlas rebuild on any of 12 tab switches (no font flash)");
+                    self.stage = Stage::Saves;
+                }
+            }
+            Stage::Saves => {
+                let edits: [(Kind, &str, serde_json::Value, &str); 3] = [
+                    (Kind::Document, "text.insert", json!({"text": " Saved from the check."}), "Q3 report.docx"),
+                    (Kind::Sheet, "cell.set", json!({"cell": "C1", "input": "Q4"}), "Budget.xlsx"),
+                    (Kind::Presentation, "slide.new", json!({}), "Pitch deck.pptx"),
+                ];
+                for (kind, cmd, args, name) in edits {
+                    let Some((tab, doc)) = Self::tab_of(app, kind) else { continue };
+                    app.tabs.activate(tab);
+                    let path = self.dir.join(name);
+                    let ed = app.engine(kind).editor_mut();
+                    let edited = ed.run_command(cmd, args).is_ok();
+                    let dirty = ed.documents().iter().any(|d| d.id == doc && d.dirty);
+                    let saved = ed.save_as(doc, &path);
+                    let clean = ed.documents().iter().any(|d| d.id == doc && !d.dirty);
+                    let size = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+                    self.check(
+                        edited && dirty && saved.is_ok() && clean && size > 0,
+                        format!("{kind:?}: edit → unsaved → Save As {name} ({size} bytes) → saved {saved:?}"),
+                    );
+                }
+                if let Some((tab, doc)) = Self::tab_of(app, Kind::Pdf) {
+                    app.tabs.activate(tab);
+                    let ed = app.engine(Kind::Pdf).editor_mut();
+                    let edited = ed.run_command("page.rotate", json!({})).is_ok();
+                    let dirty = ed.documents().iter().any(|d| d.id == doc && d.dirty);
+                    let saved = ed.save(doc);
+                    let clean = ed.documents().iter().any(|d| d.id == doc && !d.dirty);
+                    self.check(edited && dirty && saved.is_ok() && clean, format!("Pdf: rotate page → unsaved → Save in place → saved {saved:?}"));
+                }
+                self.stage = Stage::Typing { phase: 0 };
+                self.wait = 10;
+            }
+            Stage::Typing { phase } => match phase {
+                0 => {
+                    if let Some((tab, _)) = Self::tab_of(app, Kind::Document) {
+                        app.tabs.activate(tab);
+                    }
+                    self.stage = Stage::Typing { phase: 1 };
+                    self.wait = 10;
+                }
+                1 => {
+                    app.inject.push(egui::Event::Text(" Typed in Craftworks.".into()));
+                    self.stage = Stage::Typing { phase: 2 };
+                    self.wait = 10;
+                }
+                2 => {
+                    let text =
+                        app.engine(Kind::Document).editor_mut().run_command("document.text", json!({})).map(|v| v.to_string()).unwrap_or_default();
+                    let ok = text.contains("Typed in Craftworks.");
+                    if !ok && self.tries < 1_000 {
+                        // WordCraft skips drawing (and the input) for two frames after it
+                        // reinstalls fonts, as the standalone app does: try once more.
+                        self.line("NOTE typing landed in a frame WordCraft skipped after reinstalling fonts; typing again");
+                        self.tries = 1_000;
+                        self.stage = Stage::Typing { phase: 1 };
+                        self.wait = 10;
+                        return;
+                    }
+                    self.check(ok, "typing reaches WordCraft through the input path");
+                    if !ok {
+                        self.line(format!("  document text was: {}", text.chars().take(300).collect::<String>()));
+                    }
+                    if let Some((tab, _)) = Self::tab_of(app, Kind::Sheet) {
+                        app.tabs.activate(tab);
+                    }
+                    self.stage = Stage::Typing { phase: 3 };
+                    self.wait = 10;
+                }
+                3 => {
+                    let key =
+                        |key, pressed| egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: egui::Modifiers::NONE };
+                    for _ in 0..5 {
+                        app.inject.push(key(egui::Key::ArrowDown, true));
+                        app.inject.push(key(egui::Key::ArrowDown, false));
+                    }
+                    app.inject.push(egui::Event::Text("typed".into()));
+                    app.inject.push(key(egui::Key::Enter, true));
+                    app.inject.push(key(egui::Key::Enter, false));
+                    self.stage = Stage::Typing { phase: 4 };
+                    self.wait = 10;
+                }
+                _ => {
+                    let dirty = Self::tab_of(app, Kind::Sheet)
+                        .and_then(|(_, doc)| app.engine_ref(Kind::Sheet).map(|e| e.editor().documents().iter().any(|d| d.id == doc && d.dirty)))
+                        == Some(true);
+                    self.check(dirty, "arrow keys, typing and Enter reach GridCraft");
+                    self.stage = Stage::DirtyClose { phase: 0 };
+                    self.wait = 5;
+                }
+            },
+            Stage::DirtyClose { phase } => match phase {
+                0 => {
+                    if let Some((tab, _)) = Self::tab_of(app, Kind::Document) {
+                        let _ = app.engine(Kind::Document).editor_mut().run_command("text.insert", json!({"text": " Unsaved."}));
+                        app.close_tab(tab);
+                    }
+                    self.stage = Stage::DirtyClose { phase: 1 };
+                    self.wait = 20;
+                }
+                1 => {
+                    let pending = Self::tab_of(app, Kind::Document)
+                        .and_then(|(_, doc)| app.engine_ref(Kind::Document).map(|e| e.editor().close_state(doc)))
+                        == Some(CloseState::Pending);
+                    self.check(pending, "closing a document with unsaved changes shows WordCraft's own Save prompt and keeps the tab");
+                    self.screenshot(ctx, "dirty-close-prompt");
+                    self.stage = Stage::DirtyClose { phase: 2 };
+                }
+                2 => {
+                    let _ = app.engine(Kind::Document).editor_mut().run_command("ui.saveChanges", json!({"answer": "cancel"}));
+                    self.stage = Stage::DirtyClose { phase: 3 };
+                    self.wait = 10;
+                }
+                _ => {
+                    let doc = Self::tab_of(app, Kind::Document).map(|(_, d)| d);
+                    let ed = app.engine_ref(Kind::Document).map(|e| e.editor());
+                    let kept = doc.zip(ed).is_some_and(|(d, e)| e.documents().iter().any(|i| i.id == d));
+                    let prompt = ed.is_some_and(|e| e.close_prompt_open());
+                    self.check(kept && !prompt, "Cancel closes the prompt and keeps the document and its tab");
+                    self.stage = Stage::Resize { i: 0, frames: 0 };
+                    self.wait = 10;
+                }
+            },
+            Stage::Resize { i, frames } => {
+                let Some(size) = SIZES.get(i).copied() else {
+                    self.check(
+                        self.resize_worst < 16.7,
+                        format!("every frame while resizing fits 60 Hz (worst {:.1} ms of engine frame work)", self.resize_worst),
+                    );
+                    self.stage = Stage::Accessibility { frames: 0 };
+                    return;
+                };
+                if frames == 0 {
+                    ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(size[0], size[1])));
+                    self.stage = Stage::Resize { i, frames: 1 };
+                } else if frames < 12 {
+                    let ms = app.last_frame.cpu.as_secs_f64() * 1000.0;
+                    if frames > 2 {
+                        self.resize_worst = self.resize_worst.max(ms);
+                    }
+                    self.stage = Stage::Resize { i, frames: frames + 1 };
+                } else {
+                    let r = app.content_rect;
+                    self.line(format!(
+                        "RESIZE {:>4}×{:<4} engine area {:.0}×{:.0} pt at {:.0}×, engine frame {:.1} ms",
+                        size[0],
+                        size[1],
+                        r.width(),
+                        r.height(),
+                        ctx.pixels_per_point(),
+                        app.last_frame.cpu.as_secs_f64() * 1000.0
+                    ));
+                    self.stage = Stage::Resize { i: i + 1, frames: 0 };
+                }
+            }
+            Stage::Accessibility { frames } => {
+                // As a screen reader would: the window's tree, with the shown engine's grafted in.
+                if frames == 0 {
+                    ctx.enable_accesskit();
+                    if let Some((tab, _)) = Self::tab_of(app, Kind::Sheet) {
+                        app.tabs.activate(tab);
+                    }
+                }
+                if frames < 20 {
+                    self.stage = Stage::Accessibility { frames: frames + 1 };
+                    return;
+                }
+                let (nodes, labels) = app.a11y.lock().map(|s| (s.last_nodes, s.last_labels.clone())).unwrap_or_default();
+                let has = |l: &str| labels.iter().any(|x| x == l);
+                self.line(format!("A11Y merged tree: {nodes} nodes, {} labelled", labels.len()));
+                self.check(has("Tab content") && has("New tab"), "the window's tree has our chrome (tab list, New tab, tab content)");
+                self.check(has("Home") && has("Insert"), "GridCraft's ribbon (Home, Insert…) is grafted under the tab content");
+                self.stage = Stage::Memory { phase: 0 };
+            }
+            Stage::Memory { phase } => {
+                if phase == 0 {
+                    self.rss("4 engines, 1 document each");
+                    for kind in [Kind::Document, Kind::Sheet, Kind::Presentation] {
+                        for _ in 0..4 {
+                            app.new_document(kind);
+                        }
+                    }
+                    self.stage = Stage::Memory { phase: 1 };
+                    self.wait = 30;
+                } else {
+                    self.rss("+ 4 more documents each for Document, Sheet, Presentation");
+                    if let Some((tab, _)) = Self::tab_of(app, Kind::Document) {
+                        app.tabs.activate(tab);
+                    }
+                    // Idle is measured with accessibility off (no screen reader listening), first
+                    // with the window in the background, then focused.
+                    ctx.disable_accesskit();
+                    app.check_focused = false;
+                    self.stage = Stage::Idle { started: false, focused: false };
+                    self.wait = 60;
+                }
+            }
+            Stage::Idle { started: false, focused } => {
+                // Ten seconds of nothing, measured from another thread so this one can sleep.
+                let slot = self.idle.clone();
+                let waker = ctx.clone();
+                std::thread::spawn(move || {
+                    let t0 = cpu_seconds();
+                    std::thread::sleep(Duration::from_secs(10));
+                    let pct = t0.zip(cpu_seconds()).map_or(f64::NAN, |(a, b)| (b - a) / 10.0 * 100.0);
+                    if let Ok(mut g) = slot.lock() {
+                        *g = Some(pct);
+                    }
+                    waker.request_repaint();
+                });
+                self.stage = Stage::Idle { started: true, focused };
+                self.idle_frames = app.frames;
+            }
+            Stage::Idle { started: true, .. } => {}
+            Stage::Report => {
+                let warnings = logger::warnings();
+                self.line(format!("WARNINGS ({}):", warnings.len()));
+                for w in warnings.iter().take(40) {
+                    self.line(format!("  {w}"));
+                }
+                let verdict =
+                    if self.failures.is_empty() { "ALL PASS".to_string() } else { format!("{} FAILED: {:?}", self.failures.len(), self.failures) };
+                self.line(verdict);
+                let _ = std::fs::write(self.dir.join(format!("report{}.txt", self.suffix)), &self.report);
+                self.stage = Stage::Done;
+                self.wait = 5;
+            }
+            Stage::Done => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+        }
+    }
+}
+
+/// One field of `ps` for this process.
+fn ps(field: &str) -> Option<String> {
+    let out = std::process::Command::new("ps").args(["-o", field, "-p", &std::process::id().to_string()]).output().ok()?;
+    String::from_utf8(out.stdout).ok().map(|s| s.trim().to_string())
+}
+
+/// CPU time this process has used, in seconds (`ps -o time=`: `[[dd-]hh:]mm:ss.cc`).
+fn cpu_seconds() -> Option<f64> {
+    let t = ps("time=")?;
+    let mut secs = 0.0;
+    for part in t.split(':') {
+        secs = secs * 60.0 + part.replace('-', "").parse::<f64>().ok()?;
+    }
+    Some(secs)
+}

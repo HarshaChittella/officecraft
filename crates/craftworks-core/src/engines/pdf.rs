@@ -109,6 +109,11 @@ impl Editor for PdfEditor {
         self.app.close_request.is_some()
     }
 
+    fn set_dark(&mut self, dark: bool) {
+        use pdfcraft_ui_egui::theme::ThemePreference;
+        self.app.set_theme_preference(if dark { ThemePreference::Dark } else { ThemePreference::Light });
+    }
+
     fn run_command(&mut self, id: &str, _args: Value) -> Result<Value> {
         // PdfCraft's catalogue commands take no arguments; they act on the active tab.
         self.app.run_command(id);

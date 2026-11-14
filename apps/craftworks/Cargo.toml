@@ -1,6 +1,6 @@
 [package]
-name = "craftworks-harness"
-description = "Phase 1 test harness: the four Craft engines side by side in tabs of one eframe window."
+name = "craftworks"
+description = "Craftworks: documents, sheets, presentations and PDFs in tabs of one window."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -8,12 +8,14 @@ license.workspace = true
 publish.workspace = true
 
 [[bin]]
-name = "harness"
+name = "craftworks"
 path = "src/main.rs"
 
 [dependencies]
 craftworks-core = { path = "../../crates/craftworks-core" }
 craftworks-render = { path = "../../crates/craftworks-render" }
+craftworks-shell = { path = "../../crates/craftworks-shell" }
+chrono.workspace = true
 eframe.workspace = true
 egui.workspace = true
 egui-wgpu.workspace = true
@@ -23,6 +25,11 @@ log.workspace = true
 serde_json.workspace = true
 pdfcraft-engine.workspace = true
 rfd.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
 
 [lints]
 workspace = true

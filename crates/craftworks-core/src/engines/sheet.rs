@@ -109,6 +109,12 @@ impl Editor for SheetEditor {
         self.app.dialog.is_some()
     }
 
+    fn set_dark(&mut self, dark: bool) {
+        // As GridCraft's own control channel sets it: a fixed choice, not "follow the system".
+        self.app.ui.dark = dark;
+        self.app.ui.system_theme = false;
+    }
+
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value> {
         Ok(self.app.run(id, args)?)
     }

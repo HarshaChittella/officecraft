@@ -1,0 +1,62 @@
+Craftworks Phase 2 check (dark)
+MEM start page, no engines: 119 MB resident
+PASS the app opens on the start page
+PASS the PDF opened in a tab (it showed as opening meanwhile)
+PASS four tabs, one per kind (have 4)
+PASS Document tab shows its engine
+MEM after Document shown: 361 MB resident
+PASS Sheet tab shows its engine
+MEM after Sheet shown: 389 MB resident
+PASS Presentation tab shows its engine
+MEM after Presentation shown: 426 MB resident
+PASS Pdf tab shows its engine
+MEM after Pdf shown: 427 MB resident
+PASS Document looks dark like the window (mean luminance 0.17)
+PASS Sheet looks dark like the window (mean luminance 0.18)
+PASS Presentation looks dark like the window (mean luminance 0.18)
+PASS Pdf looks dark like the window (mean luminance 0.17)
+PASS ⌘T's new-tab popover is open
+SWITCH  0 → Sheet        first frame: font atlas rebuilt = false, engine cpu 0.8 ms
+SWITCH  1 → Presentation first frame: font atlas rebuilt = false, engine cpu 1.9 ms
+SWITCH  2 → Pdf          first frame: font atlas rebuilt = false, engine cpu 0.7 ms
+SWITCH  3 → Document     first frame: font atlas rebuilt = false, engine cpu 0.7 ms
+SWITCH  4 → Sheet        first frame: font atlas rebuilt = false, engine cpu 0.8 ms
+SWITCH  5 → Presentation first frame: font atlas rebuilt = false, engine cpu 1.9 ms
+SWITCH  6 → Pdf          first frame: font atlas rebuilt = false, engine cpu 0.7 ms
+SWITCH  7 → Document     first frame: font atlas rebuilt = false, engine cpu 0.7 ms
+SWITCH  8 → Sheet        first frame: font atlas rebuilt = false, engine cpu 0.9 ms
+SWITCH  9 → Presentation first frame: font atlas rebuilt = false, engine cpu 4.1 ms
+SWITCH 10 → Pdf          first frame: font atlas rebuilt = false, engine cpu 1.1 ms
+SWITCH 11 → Document     first frame: font atlas rebuilt = false, engine cpu 1.5 ms
+PASS no font atlas rebuild on any of 12 tab switches (no font flash)
+PASS Document: edit → unsaved → Save As Q3 report.docx (6631 bytes) → saved Ok(())
+PASS Sheet: edit → unsaved → Save As Budget.xlsx (4160 bytes) → saved Ok(())
+PASS Presentation: edit → unsaved → Save As Pitch deck.pptx (23438 bytes) → saved Ok(())
+PASS Pdf: rotate page → unsaved → Save in place → saved Ok(())
+PASS typing reaches WordCraft through the input path
+PASS arrow keys, typing and Enter reach GridCraft
+PASS closing a document with unsaved changes shows WordCraft's own Save prompt and keeps the tab
+PASS Cancel closes the prompt and keeps the document and its tab
+RESIZE 1100×760  engine area 1100×728 pt at 2×, engine frame 0.8 ms
+RESIZE 1600×1000 engine area 1600×917 pt at 2×, engine frame 0.8 ms
+RESIZE  900×620  engine area 900×588 pt at 2×, engine frame 0.6 ms
+RESIZE 1440×920  engine area 1440×888 pt at 2×, engine frame 0.8 ms
+PASS every frame while resizing fits 60 Hz (worst 2.1 ms of engine frame work)
+A11Y merged tree: 176 nodes, 82 labelled
+PASS the window's tree has our chrome (tab list, New tab, tab content)
+PASS GridCraft's ribbon (Home, Insert…) is grafted under the tab content
+MEM 4 engines, 1 document each: 433 MB resident
+MEM + 4 more documents each for Document, Sheet, Presentation: 435 MB resident
+IDLE CPU over 10 s, window in the background: 0.3 %, 5 frames
+  wake: window asked for its next frame: now ×3
+  wake: window asked for its next frame: ≥100 ms ×2
+  wake: Sheet (hidden) has work ×1
+PASS an idle window in the background uses (almost) no CPU (0.3 %; the pointer must stay off the window)
+IDLE CPU over 10 s, window focused, caret blinking in the Document tab: 5.2 %, 126 frames
+  wake: Document (shown) repaint after 16ms ×103
+  wake: window asked for its next frame: 16 ms ×103
+  wake: window asked for its next frame: ≥100 ms ×19
+  wake: Document (shown) repaint after 429ms ×5
+PASS a focused document with a blinking caret stays light (5.2 % CPU, budget 8 %)
+WARNINGS (0):
+ALL PASS

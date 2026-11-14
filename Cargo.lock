@@ -1658,6 +1658,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "craftworks"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "craftworks-core",
+ "craftworks-render",
+ "craftworks-shell",
+ "eframe",
+ "egui",
+ "egui-wgpu",
+ "image",
+ "log",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "pdfcraft-engine",
+ "rfd",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
 name = "craftworks-core"
 version = "0.1.0"
 dependencies = [
@@ -1676,23 +1698,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "craftworks-harness"
-version = "0.1.0"
-dependencies = [
- "craftworks-core",
- "craftworks-render",
- "eframe",
- "egui",
- "egui-wgpu",
- "image",
- "log",
- "pdfcraft-engine",
- "rfd",
- "serde_json",
- "wgpu",
-]
-
-[[package]]
 name = "craftworks-render"
 version = "0.1.0"
 dependencies = [
@@ -1700,7 +1705,19 @@ dependencies = [
  "egui",
  "egui-wgpu",
  "log",
+ "serde_json",
  "wgpu",
+]
+
+[[package]]
+name = "craftworks-shell"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "craftworks-core",
+ "egui",
+ "log",
+ "serde_json",
 ]
 
 [[package]]
