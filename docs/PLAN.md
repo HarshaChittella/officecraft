@@ -1,6 +1,6 @@
 # Craftworks plan
 
-Status: **approved** 2026-11-14 (D1–D15 settled). Phase 0 in progress.
+Status: **approved** 2026-11-14 (D1–D17 settled). **Phase 0 done** 2026-11-14; Phase 1 next.
 Companions: [decisions.md](decisions.md) (open and settled choices), [upstream-patches.md](upstream-patches.md) (hooks we need in the Craft repos).
 
 This plan turns the brief's §5 into tasks. Each phase lists its tasks, then the checks that must pass before the next phase starts. After every phase: `cargo test`, `cargo clippy --all-targets -- -D warnings`, `xcodebuild build` (from Phase 2), and screenshots where the UI changed.

@@ -116,21 +116,24 @@ H7 and the PdfCraft live backend are the final task in Phase 7, after the Word, 
 - The forks of the four repos go under the owner's GitHub account.
 - Submodules track upstream `storytold/*`; each fork is added as a second remote named `fork` for the patch branches.
 
-## D16 craft-libs: one revision, `e2dc681`, for every app. PROVISIONAL 2026-11-14
+## D16 craft-libs: one revision, `e2dc681`, for every app. SETTLED 2026-11-14
 
 - Before: 9 craft-libs revisions in the graph (`92d392c`, `762a06a`, `01315d9`, `6e03f65`, `aa84415`, `bb57d42`, `63196e6`, `75c70fa`, `e2dc681`). They lie on one line of history, and `e2dc681` (PdfCraft's pin, 2026-11-13) contains all of them.
 - Change: `vendor/craft-libs` is a submodule at `e2dc681`. Root `[patch."https://github.com/storytold/craft-libs"]` points all 37 craft-libs crates at it. `krilla` stays on the brief's `6e03f65` through the crates-io patch.
 - `cargo check` passes. craft-libs duplicates drop to 0, and lockfile packages go from 942 to 926.
-- **Kept only if** every app's own suite passes with it: `CW_ALIGN=1 scripts/upstream-tests.sh`. Results are under "Upstream test results".
+- **Kept:** every app's own suite gives exactly the same results with and without it (see "Upstream test results").
+- One exception, outside our graph: WordCraft's **desktop binary** (`apps/wordcraft`) pins its own `craft-print` (`a3e0b5a`), and with it moved to `e2dc681` the binary no longer compiles (`craft_print::Job` gained `driver_settings` and `grey_pages`). We never link that binary, so its tests are run without the alignment, and the aligned run uses `--exclude wordcraft`.
 
-## D17 Build inputs. PROVISIONAL 2026-11-14
+## D17 Build inputs. SETTLED 2026-11-14: craft-i18n `1e51542`
 
 - `CRAFT_FONTS_DIR` → `vendor/craft-fonts` at `c1db6d1` (HEAD). No app pins craft-fonts.
 - `CRAFT_I18N_DIR` → `vendor/craft-i18n` at `1e51542` (WordCraft's pin). It is 57 commits ahead of PdfCraft's `575cfde` and contains it. One cargo build can only point at one copy.
 - **Known cost:** 2 PdfCraft UI tests fail on `1e51542` and pass on `575cfde`:
   - `fonts::primary_ui_fonts_cover_latin_and_cyrillic_catalogs`: the French catalog now uses `▸`, which Inter lacks.
   - `comments::hotbar_picker_searches_translated_tool_labels`: the label "Hotbar settings" changed.
-- In the app, that means a missing-glyph box in French PDF menus, plus one label that differs from PdfCraft's tests. The choice between the two revisions waits for WordCraft's results on `575cfde`. If WordCraft passes on the older one, we use the older one.
+- In the app, that means a missing-glyph box in French PDF menus, plus one label that differs from PdfCraft's tests.
+- WordCraft's suite gives identical results on either revision.
+- **We keep `1e51542`.** The older revision would drop about 27k lines of translations, most of them WordCraft's (`wordcraft.tsv` across 36 locales, including missing French and Arabic rows), and no test would notice. The newer one costs one glyph and one label in PdfCraft, which PdfCraft upstream will hit as well when it moves to this revision.
 
 ## Upstream test results (task 0.6)
 
@@ -146,9 +149,23 @@ Runs on 2026-11-14. Every run is logged under `plan/logs/` (gitignored), one tim
 | LibreOffice conversion: `office::*` ×2, `libreoffice_converts…`, `open_worker::file_open_converts…`, `engine office_documents…` | 5 | This machine has a stale Homebrew wrapper: `/opt/homebrew/bin/soffice` points at `/Applications/LibreOffice.app`, which is gone, so it exits 126. | All 5 also fail on unmodified pins. Fix: `brew reinstall --cask libreoffice` or `brew uninstall --cask libreoffice`. |
 | `fonts::primary_ui_fonts…`, `comments::hotbar_picker…` | 2 | craft-i18n `1e51542` vs `575cfde` (D17). | Both pass on `575cfde`. |
 
+The aligned run (D16) fails exactly the same 19 tests.
+
 ### WordCraft, GridCraft, DeckCraft (move from egui `6d518fc` to `725a39f`)
 
-Running.
+| App | Aligned run | Failures | Cause | Evidence |
+|---|---|---|---|---|
+| DeckCraft | 2,262 passed | 0 | — | — |
+| GridCraft | 3,875 passed | 1: `caret_after_typing_arabic_is_drawn_at_its_left_end` (caret at x=10, text spans 0–26.9) | Already failing upstream in this environment, probably Arabic font coverage | Also fails on GridCraft's own pins (egui `6d518fc`) |
+| WordCraft | 5,475 passed (binary excluded); 5,548 unaligned with the binary | 38, the same with and without D16 and on either craft-i18n: `wordcraft-docx` (glossary, line numbering, run properties, tracked styles) 12, `wordcraft-engine` lib (`fit_one_page`, tracked styles) 12, `strict_export` 10 ("the host has faces covering all of plane 4"), `wordcraft-cli` 4 | Already failing at WordCraft HEAD on this machine: none of these crates depends on egui | All 38 also fail on WordCraft's own pins |
+
+**Conclusion:** moving to egui `725a39f` and aligning craft-libs causes **no** test failures in any app. The only failures our setup causes are PdfCraft's 2 craft-i18n tests (D17).
+
+Upstream reports to offer (each needs the owner's OK first):
+- PdfCraft: xattr-preserving saves fail with `ERANGE` on macOS 27.2.
+- WordCraft: 38 failures at `514085c`.
+- GridCraft: the Arabic caret test.
+- PdfCraft: French catalog `▸` not in Inter.
 
 ## Duplicate crates (`cargo tree -d`, task 0.9)
 
