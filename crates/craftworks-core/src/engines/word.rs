@@ -10,6 +10,8 @@ use wordcraft_ui_egui::{Services, WordApp};
 
 pub struct WordEditor {
     app: WordApp,
+    /// AutoSave as it was before an AI's edits paused it.
+    autosave_before: Option<bool>,
 }
 
 impl WordEditor {
@@ -21,7 +23,7 @@ impl WordEditor {
     pub fn with_services(services: Services) -> Self {
         let mut app = WordApp::new(Session::new(wordcraft_doc::Document::new()), services);
         app.use_one_window();
-        WordEditor { app }
+        WordEditor { app, autosave_before: None }
     }
 
     /// The wrapped app, for the host's own needs (control, tests).
@@ -108,6 +110,32 @@ impl Editor for WordEditor {
 
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value> {
         Ok(self.app.run(id, args)?)
+    }
+
+    fn hold_autosave(&mut self, hold: bool) {
+        match (hold, self.autosave_before) {
+            (true, None) => {
+                self.autosave_before = Some(self.app.autosave);
+                self.app.autosave = false;
+            }
+            (false, Some(was)) => {
+                self.app.autosave = was;
+                self.autosave_before = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn control(&mut self, doc: DocId, method: &str, params: Value) -> std::result::Result<Value, String> {
+        use wordcraft_mcp::Backend;
+        self.activate(doc).map_err(|e| e.to_string())?;
+        // WordCraft's own headless backend answers, on the open document's session (lent to
+        // it for this call and taken straight back).
+        let mut h = wordcraft_mcp::Headless::default();
+        std::mem::swap(&mut h.session, &mut self.app.session);
+        let r = h.call(method, params);
+        std::mem::swap(&mut h.session, &mut self.app.session);
+        r
     }
 
     fn logic(&mut self, ctx: &egui::Context) {

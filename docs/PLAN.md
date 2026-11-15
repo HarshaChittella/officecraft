@@ -327,6 +327,29 @@ Tasks
 
 Done when: with only this server connected, Claude Code completes the three brief scenarios, and in scenario 1 the open `report.docx` tab changes live and the change can be undone.
 
+**Result so far (2026-11-16): 7.1–7.6 done; 7.7 (live PDF edits, H7) and the run with Claude Code itself are open.** Setup and use are in `docs/ai.md`.
+- **7.1–7.2** `crates/craftworks-mcp`:
+  - one MCP server (JSON-RPC over stdio, no new dependency);
+  - WordCraft's, GridCraft's and DeckCraft's own tools prefixed `doc.`, `sheet.`, `deck.`, each with a `file` argument;
+  - PdfCraft's own MCP server inside it as `pdf.*`, confined to the project by its own root;
+  - `project_files`, `project_search`, `project_read`, `project_open`, `project_save`;
+  - compact by default (11 core tools plus `tool_search` and `tool_call`).
+- **7.3 Live** (D44):
+  - **Window side:** the window listens on a Unix socket in its settings folder, with a per-launch token (mode 0600). It answers on the main thread by lending the open tab's session to the app's own `Headless` backend (`Editor::control`), so an AI's edit is an ordinary command: shown at once, and undone by the app's own Undo. Tested in WordCraft, GridCraft and DeckCraft.
+  - **Server side:** a file open in the window is edited there; other files run headless.
+- **7.4 Safety:**
+  - Every path goes through the project jail: `..`, absolute paths outside and escaping symlinks are refused, and so are path arguments inside tools.
+  - `project.json` permissions: `read` (default) refuses edits; `edit` routes an edit into the window for review; only `edit_save` saves. The window re-checks the permission when asked to save.
+  - Review: the AI pill in the title row, and a panel with Keep (save) or Undo per file.
+  - WordCraft's and GridCraft's AutoSave pause while edits wait for review (D45). Without that, WordCraft had already saved the AI's edit.
+  - Not done: WordCraft track changes for AI edits. Undo per file covers it for now.
+- **7.5:** the same binary is the CLI: `craftworks mcp --project DIR [--all-tools]` and `craftworks open FILE…` (D43). There's no separate `apps/craftworks-cli`.
+- **7.6:** `scripts/ai-scenarios.py` runs the brief's three scenarios through the real binary with fixture files the connector makes itself: **9/9 pass**. Scenario 1 has a real window with `report.docx` open: the table appears in the tab, the `edit` project doesn't save it, and Undo takes it back. `--check` has an AI stage (a stand-in AI on its own thread, through the real connector): read the sheet, write a table into the open document, nothing saved after 4 s, the review panel lists it, its Undo takes it back. Screenshot `ai-review-*.png`.
+- **Tests:** 71 `--check` checks pass in light and dark; 107 tests pass, plus 2 ignored.
+- **Left:**
+  - 7.7, live PDF edits (an upstream PdfCraft hook, H7).
+  - Your run with Claude Code (`docs/ai.md` has the one-line setup).
+
 ## Phase 8: Polish and ship
 
 - 8.1 Accessibility: one AccessKit tree for the window. The shell's nodes, with the active engine's tree grafted under the tab's content node, go to eframe's `accesskit_macos` adapter. Then a VoiceOver pass over the chrome and each engine. (Combining trees from several egui contexts is the main risk here; it's spiked early in Phase 2.)

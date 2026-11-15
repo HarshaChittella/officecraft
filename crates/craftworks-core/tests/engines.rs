@@ -370,3 +370,55 @@ fn closing_a_background_presentation_closes_it() {
     frames(&ctx, ed.as_mut(), 3);
     assert_eq!(ed.close_state(a), CloseState::Closed, "documents left: {:?}", ed.documents().iter().map(|d| d.path.clone()).collect::<Vec<_>>());
 }
+
+/// A live request (Phase 7) edits the open document through the app's own headless backend,
+/// and the app's Undo takes the edit back.
+#[test]
+fn live_requests_edit_the_open_document_and_undo() {
+    let ctx = egui::Context::default();
+    // WordCraft.
+    let mut ed = new_editor(Kind::Document);
+    frames(&ctx, ed.as_mut(), 2);
+    let doc = ed.new_document().unwrap();
+    frames(&ctx, ed.as_mut(), 2);
+    ed.control(doc, "engine.execute", json!({"command": "text.insert", "params": {"text": "Live edit"}})).unwrap();
+    frames(&ctx, ed.as_mut(), 1);
+    let text = |ed: &mut Box<dyn Editor>| ed.control(doc, "document.inspect", json!({})).unwrap().to_string();
+    assert!(text(&mut ed).contains("Live edit"));
+    assert!(info(ed.as_ref(), doc).dirty);
+    ed.run_command("edit.undo", json!({})).unwrap();
+    frames(&ctx, ed.as_mut(), 1);
+    assert!(!text(&mut ed).contains("Live edit"), "WordCraft's Undo takes the AI's edit back");
+
+    // GridCraft.
+    let mut ed = new_editor(Kind::Sheet);
+    frames(&ctx, ed.as_mut(), 2);
+    let doc = ed.new_document().unwrap();
+    frames(&ctx, ed.as_mut(), 2);
+    ed.control(doc, "engine.execute", json!({"command": "cell.set", "params": {"cell": "B2", "input": "1350"}})).unwrap();
+    frames(&ctx, ed.as_mut(), 1);
+    let read = ed.control(doc, "sheet.read", json!({"range": "B2"})).unwrap().to_string();
+    assert!(read.contains("1350"), "{read}");
+    ed.run_command("edit.undo", json!({})).unwrap();
+    frames(&ctx, ed.as_mut(), 1);
+    let read = ed.control(doc, "sheet.read", json!({"range": "B2"})).unwrap().to_string();
+    assert!(!read.contains("1350"), "GridCraft's Undo takes it back: {read}");
+
+    // DeckCraft.
+    let mut ed = new_editor(Kind::Presentation);
+    frames(&ctx, ed.as_mut(), 2);
+    let doc = ed.new_document().unwrap();
+    frames(&ctx, ed.as_mut(), 2);
+    ed.control(doc, "engine.execute", json!({"command": "insert.textBox", "params": {"text": "From the AI"}})).unwrap();
+    frames(&ctx, ed.as_mut(), 1);
+    let inspect = ed.control(doc, "engine.execute", json!({"command": "slide.inspect", "params": {}})).unwrap().to_string();
+    assert!(inspect.contains("From the AI"), "{inspect}");
+    ed.run_command("edit.undo", json!({})).unwrap();
+    frames(&ctx, ed.as_mut(), 1);
+    let inspect = ed.control(doc, "engine.execute", json!({"command": "slide.inspect", "params": {}})).unwrap().to_string();
+    assert!(!inspect.contains("From the AI"), "DeckCraft's Undo takes it back");
+
+    // PdfCraft: not live yet (H7).
+    let mut ed = new_editor(Kind::Pdf);
+    assert!(ed.control(DocId(1), "document.inspect", json!({})).is_err());
+}

@@ -22,6 +22,10 @@ pdfcraft-ui-egui = { path = "vendor/pdfcraft/crates/ui-egui" }
 pdfcraft-engine = { path = "vendor/pdfcraft/crates/engine" }
 wordcraft-doc = { path = "vendor/wordcraft/crates/doc" }
 pdfcraft-render = { path = "vendor/pdfcraft/crates/render" }
+wordcraft-mcp = { path = "vendor/wordcraft/crates/mcp" }
+gridcraft-mcp = { path = "vendor/gridcraft/crates/mcp" }
+deckcraft-mcp = { path = "vendor/deckcraft/crates/mcp" }
+pdfcraft-automation = { path = "vendor/pdfcraft/crates/automation" }
 # Third-party crates already in the Craft apps' graph (same versions).
 egui = "0.37"
 egui-wgpu = "0.37"

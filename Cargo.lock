@@ -1484,6 +1484,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "craft-prc"
+version = "0.1.0"
+source = "git+https://github.com/storytold/craft-libs?rev=e2dc681a3#e2dc681a3ad8a47038da2f11ddd2c5e1c0454991"
+dependencies = [
+ "flate2",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "craft-print"
 version = "0.1.0"
 dependencies = [
@@ -1666,6 +1675,7 @@ dependencies = [
  "craft-menu",
  "craft-quit",
  "craftworks-core",
+ "craftworks-mcp",
  "craftworks-platform",
  "craftworks-render",
  "craftworks-shell",
@@ -1691,9 +1701,11 @@ dependencies = [
  "craft-keymap",
  "craft-menu",
  "deckcraft-engine",
+ "deckcraft-mcp",
  "deckcraft-ui-egui",
  "egui",
  "gridcraft-engine",
+ "gridcraft-mcp",
  "gridcraft-ui-egui",
  "log",
  "pdfcraft-engine",
@@ -1702,7 +1714,23 @@ dependencies = [
  "serde_json",
  "wordcraft-doc",
  "wordcraft-engine",
+ "wordcraft-mcp",
  "wordcraft-ui-egui",
+]
+
+[[package]]
+name = "craftworks-mcp"
+version = "0.1.0"
+dependencies = [
+ "craftworks-core",
+ "deckcraft-mcp",
+ "egui",
+ "gridcraft-mcp",
+ "log",
+ "pdfcraft-automation",
+ "pdfcraft-engine",
+ "serde_json",
+ "wordcraft-mcp",
 ]
 
 [[package]]
@@ -1991,6 +2019,16 @@ version = "0.18.1"
 dependencies = [
  "kurbo 0.13.1",
  "serde",
+]
+
+[[package]]
+name = "deckcraft-mcp"
+version = "0.18.1"
+dependencies = [
+ "deckcraft-engine",
+ "deckcraft-render",
+ "log",
+ "serde_json",
 ]
 
 [[package]]
@@ -3319,6 +3357,15 @@ dependencies = [
  "ratex-layout",
  "ratex-parser",
  "ratex-types",
+]
+
+[[package]]
+name = "gridcraft-mcp"
+version = "0.19.1"
+dependencies = [
+ "gridcraft-engine",
+ "log",
+ "serde_json",
 ]
 
 [[package]]
@@ -5219,6 +5266,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pdfcraft-automation"
+version = "0.21.1"
+dependencies = [
+ "base64 0.23.1",
+ "craft-prc",
+ "pdfcraft-cos",
+ "pdfcraft-engine",
+ "pdfcraft-organize",
+ "pdfcraft-platform",
+ "pdfcraft-prc-render",
+ "pdfcraft-render",
+ "serde_json",
+ "sha2 0.11.1",
+ "tempfile",
+]
+
+[[package]]
 name = "pdfcraft-compare"
 version = "0.21.1"
 
@@ -5427,6 +5491,14 @@ dependencies = [
  "log",
  "rustix 1.1.6",
  "zbus",
+]
+
+[[package]]
+name = "pdfcraft-prc-render"
+version = "0.21.1"
+dependencies = [
+ "craft-prc",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -9521,6 +9593,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "wordcraft-control-key"
+version = "0.18.1"
+
+[[package]]
 name = "wordcraft-doc"
 version = "0.18.1"
 dependencies = [
@@ -9655,6 +9731,18 @@ dependencies = [
  "wordcraft-fonts",
  "wordcraft-geom",
  "wordcraft-metafile",
+]
+
+[[package]]
+name = "wordcraft-mcp"
+version = "0.18.1"
+dependencies = [
+ "log",
+ "serde_json",
+ "wordcraft-control-key",
+ "wordcraft-doc",
+ "wordcraft-engine",
+ "wordcraft-render",
 ]
 
 [[package]]

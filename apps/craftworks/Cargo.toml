@@ -16,6 +16,7 @@ craftworks-core = { path = "../../crates/craftworks-core" }
 craftworks-render = { path = "../../crates/craftworks-render" }
 craftworks-shell = { path = "../../crates/craftworks-shell" }
 craftworks-platform = { path = "../../crates/craftworks-platform" }
+craftworks-mcp = { path = "../../crates/craftworks-mcp" }
 chrono.workspace = true
 eframe.workspace = true
 egui.workspace = true

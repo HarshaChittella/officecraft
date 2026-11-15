@@ -7,10 +7,14 @@
 //! craftworks --check DIR [--appearance light|dark]
 //!                                       the acceptance run: screenshots, checks and a report
 //!                                       in DIR/report.txt, then quit
+//! craftworks mcp --project DIR [--all-tools]
+//!                                       the AI connector (MCP over stdio), no window
+//! craftworks open FILE…                 open files in the running window (or start it)
 //! ```
 //! `CW_LOG=debug` logs more (default: warnings).
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod ai;
 mod app;
 mod check;
 mod logger;
@@ -24,6 +28,12 @@ use std::path::PathBuf;
 
 fn main() -> eframe::Result {
     logger::install();
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    match args.first().map(String::as_str) {
+        Some("mcp") => std::process::exit(mcp(&args[1..])),
+        Some("open") => std::process::exit(open_in_window(&args[1..])),
+        _ => {}
+    }
     let mut files = Vec::new();
     let mut check_dir = None;
     let mut forced_dark = None;
@@ -73,6 +83,10 @@ fn main() -> eframe::Result {
                 craftworks_platform::Platform::system()
             };
             let mut app = app::App::new(render, &cc.egui_ctx, forced_dark, platform);
+            // The AI connector (`craftworks mcp`) reaches this window through the settings folder.
+            if let Some(dir) = settings::dir() {
+                app.ai.start(&dir, &cc.egui_ctx);
+            }
             #[cfg(target_os = "macos")]
             {
                 let ctx = cc.egui_ctx.clone();
@@ -93,4 +107,64 @@ fn main() -> eframe::Result {
             Ok(Box::new(app))
         }),
     )
+}
+
+/// `craftworks mcp --project DIR [--all-tools]`: the MCP server over stdin and stdout.
+fn mcp(args: &[String]) -> i32 {
+    let mut project = None;
+    let mut compact = true;
+    let mut it = args.iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--project" => project = it.next().map(PathBuf::from),
+            "--all-tools" => compact = false,
+            "-h" | "--help" => {
+                eprintln!("craftworks mcp --project DIR [--all-tools]");
+                return 0;
+            }
+            other => {
+                eprintln!("craftworks mcp: unknown argument {other:?}");
+                return 2;
+            }
+        }
+    }
+    let project = project.or_else(|| std::env::current_dir().ok()).unwrap_or_else(|| PathBuf::from("."));
+    let mut server = match craftworks_mcp::Server::new(&project, compact) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("craftworks mcp: {e}");
+            return 1;
+        }
+    };
+    let stdin = std::io::stdin();
+    let stdout = std::io::stdout();
+    match server.serve(stdin.lock(), stdout.lock()) {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("craftworks mcp: {e}");
+            1
+        }
+    }
+}
+
+/// `craftworks open FILE…`: in the running window, or a new one.
+fn open_in_window(files: &[String]) -> i32 {
+    let paths: Vec<PathBuf> = files.iter().map(PathBuf::from).map(|p| p.canonicalize().unwrap_or(p)).collect();
+    if let Some(mut w) = craftworks_mcp::live::settings_dir().as_deref().and_then(craftworks_mcp::live::LiveClient::connect) {
+        let mut failed = 0;
+        for p in &paths {
+            if let Err(e) = w.request("open", serde_json::json!({"path": p.to_string_lossy()})) {
+                eprintln!("craftworks open: {}: {e}", p.display());
+                failed += 1;
+            }
+        }
+        return i32::from(failed > 0);
+    }
+    match std::env::current_exe().and_then(|exe| std::process::Command::new(exe).args(&paths).spawn()) {
+        Ok(_) => 0,
+        Err(e) => {
+            eprintln!("craftworks open: {e}");
+            1
+        }
+    }
 }

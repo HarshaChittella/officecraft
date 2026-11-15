@@ -90,6 +90,8 @@ pub struct App {
     /// The project sidebar, and the projects behind it.
     pub sidebar: Sidebar,
     pub projects: projects::Projects,
+    /// The AI connector's live requests and the changes waiting for review.
+    pub ai: crate::ai::AiState,
     /// Each app's commands for its menus, read once (craftworks_core::catalog).
     catalogs: HashMap<Kind, Vec<craftworks_core::catalog::MenuEntry>>,
     /// Projects being closed from their group's menu, waiting for their tabs to close.
@@ -151,6 +153,7 @@ impl App {
             recent: settings::load_recent(),
             sidebar: Sidebar::default(),
             projects: projects::Projects::default(),
+            ai: crate::ai::AiState::default(),
             catalogs: HashMap::new(),
             closing_projects: Vec::new(),
             last_front: None,
@@ -286,15 +289,17 @@ impl App {
         self.engine_ref(t.kind)?.editor().documents().into_iter().find(|d| d.id == t.doc)?.path
     }
 
-    /// The tab that shows `path`, if any.
+    /// The tab that shows `path`, if any (compared as real paths: relative or through a link,
+    /// the same file is the same tab).
     pub fn tab_for_path(&self, path: &Path) -> Option<TabId> {
+        let want = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
         self.tabs
             .iter()
             .find(|t| {
                 self.engine_ref(t.kind)
                     .and_then(|e| e.editor().documents().into_iter().find(|d| d.id == t.doc))
                     .and_then(|d| d.path)
-                    .is_some_and(|p| p == path)
+                    .is_some_and(|p| p == path || p.canonicalize().is_ok_and(|c| c == want))
             })
             .map(|t| t.id)
     }
@@ -1204,6 +1209,8 @@ impl eframe::App for App {
             self.start_quit();
             ctx.request_repaint();
         }
+        // The AI's requests are answered even while the window is hidden.
+        self.serve_ai(ctx);
         // Last, so it sees the CancelClose above (craft-quit's rule).
         craft_quit::on_close_request(ctx);
     }
@@ -1251,7 +1258,23 @@ impl eframe::App for App {
         egui::Panel::top("cw_title").exact_size(tb.height).frame(egui::Frame::NONE.fill(p.surface)).show(ui, |ui| {
             let r = ui.max_rect();
             ui.painter().hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, p.hairline));
-            let strip = Rect::from_min_max(pos2(r.left() + tb.content_left, r.top()), pos2(r.right() - 12.0, r.bottom()));
+            // The AI's pill at the right, once an AI has been in touch.
+            let mut right = r.right() - 12.0;
+            let now = ctx.input(|i| i.time);
+            self.ai.pill_rect = None;
+            if let Some(status) = self.ai.status(now) {
+                let w = craftworks_shell::ai::pill_width(ui, &status);
+                let pr = Rect::from_min_size(pos2(right - w, r.center().y - 12.0), egui::vec2(w, 24.0));
+                if craftworks_shell::ai::pill(ui, pr, &p, &status) {
+                    self.ai.review_open = !self.ai.review_open;
+                }
+                self.ai.pill_rect = Some(pr);
+                right = pr.left() - 8.0;
+                if matches!(status, craftworks_shell::ai::AiStatus::Editing(_)) {
+                    ctx.request_repaint_after(Duration::from_millis(500));
+                }
+            }
+            let strip = Rect::from_min_max(pos2(r.left() + tb.content_left, r.top()), pos2(right, r.bottom()));
             let items = self.tab_items();
             let groups = self.group_items();
             let active = self.tabs.active().map(|t| t.id.0);
@@ -1314,6 +1337,18 @@ impl eframe::App for App {
             let view = RecentView { recent: &self.recent, now: chrono::Local::now(), home: home.as_deref(), exists: &exists };
             if let Some(a) = self.newtab.popover(&ctx, &p, anchor, &view) {
                 self.on_newtab_action(a);
+            }
+        }
+        if self.ai.review_open
+            && let Some(anchor) = self.ai.pill_rect
+        {
+            let can_all = !self.ai.changed.is_empty();
+            let changed = self.ai.changed.clone();
+            let mut open = true;
+            let acts = craftworks_shell::ai::review(&ctx, &p, anchor, &changed, can_all, &mut open);
+            self.ai.review_open = open;
+            for a in acts {
+                self.on_review(a);
             }
         }
         let _ = self.toasts.show(&ctx, &p, self.content_rect);

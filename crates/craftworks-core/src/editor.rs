@@ -135,6 +135,18 @@ pub trait Editor {
         }
     }
 
+    /// Answers one request of the app's MCP backend protocol (`engine.execute`,
+    /// `document.inspect`, `sheet.read`…) on `doc`, the way the app's own headless backend
+    /// answers it, but against this open document: an AI's edit is an ordinary command, shown
+    /// at once and undoable (Phase 7, Live). `doc` becomes the app's active document.
+    fn control(&mut self, _doc: DocId, method: &str, _params: Value) -> std::result::Result<Value, String> {
+        Err(format!("{method}: this app doesn't take live requests yet"))
+    }
+
+    /// Pauses the app's AutoSave (true) while an AI's edits wait for review, so nothing is
+    /// saved before you keep it; false puts it back as it was. Apps without one ignore this.
+    fn hold_autosave(&mut self, _hold: bool) {}
+
     /// The app's own Mac menu bar, as it is now, if it has one (PdfCraft). `ctx` is the
     /// engine's context. The others' menus are built from [`crate::catalog`].
     fn native_menus(&self, _ctx: &egui::Context) -> Option<craft_menu::MenuBar> {

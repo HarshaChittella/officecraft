@@ -329,6 +329,19 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 - A clicked item with a shortcut sends that keystroke (the app's own handling, dialogs included). One without a shortcut runs the command; one that needs arguments and has no shortcut is left out.
 - `craftworks-core` now depends on `craft-menu` and `craft-keymap`, from craft-libs at the pinned revision; they're not new to the graph.
 
+## D43 One binary: the window, `mcp` and `open`. SETTLED 2026-11-16
+
+- `craftworks mcp --project DIR` runs the connector without a window, and `craftworks open FILE` hands files to the running window (or starts it). There's no separate `apps/craftworks-cli`: the app bundle's one executable serves both, so the Claude Code setup line names a file every install has.
+
+## D44 Live edits go through each app's own headless backend. SETTLED 2026-11-16
+
+- The Craft apps' control servers live in their binaries, which we can't link. Instead, the window lends the open tab's `Session` to the app's own `Headless` (`wordcraft_mcp`, `gridcraft_mcp`, `deckcraft_mcp`) for one request on the main thread, then takes it back. The semantics are exactly the app's, and the edit lands on the app's undo stack.
+- Window ↔ server: a Unix socket in the settings folder and a per-launch token file (0600), like GridCraft's `control_auth`, but local-only. An edit brings its tab to the front so you watch it change.
+
+## D45 AutoSave pauses while an AI's edits wait for review. SETTLED 2026-11-16
+
+- WordCraft and GridCraft save a changed file within a few seconds when AutoSave is on, which would save an AI's edit before you see it. While an app has AI edits in the review list, Craftworks turns its AutoSave off. Keep or Undo puts it back as it was. DeckCraft only writes AutoRecover copies, so it's left alone.
+
 ## Upstream test results (task 0.6)
 
 Runs on 2026-11-14. Every run is logged under `plan/logs/` (gitignored), one timestamped file per run.

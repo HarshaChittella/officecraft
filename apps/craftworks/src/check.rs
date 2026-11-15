@@ -42,6 +42,7 @@ enum Stage {
     Routing { phase: u8 },
     Services { phase: u8 },
     Projects { phase: u8 },
+    Ai { phase: u8 },
     Resize { i: usize, frames: u32 },
     Accessibility { frames: u32 },
     Menus { phase: u8 },
@@ -70,6 +71,8 @@ pub struct Check {
     settle_until: Option<f64>,
     /// When the current wait for something to happen started (seconds, the window's clock).
     since: Option<f64>,
+    /// The stand-in AI's tool results, from its own thread.
+    ai_rx: Option<std::sync::mpsc::Receiver<serde_json::Value>>,
     wakes: std::collections::BTreeMap<String, u64>,
     resize_worst: f64,
     /// Mean luminance (0–1) of each tab's engine area, from its screenshot.
@@ -99,6 +102,7 @@ impl Check {
             idle_retries: 0,
             settle_until: None,
             since: None,
+            ai_rx: None,
             wakes: Default::default(),
             resize_worst: 0.0,
             luminance: Arc::new(Mutex::new(Vec::new())),
@@ -859,12 +863,110 @@ impl Check {
                         }
                     }
                     _ => {
-                        self.stage = Stage::DirtyClose { phase: 0 };
+                        self.stage = Stage::Ai { phase: 0 };
                         self.wait = 5;
                         return;
                     }
                 }
                 self.stage = Stage::Projects { phase: phase + 1 };
+            }
+            // Phase 7: an AI, through the real connector on its own thread, writes a table into
+            // the open document; the window shows it live, lists it for review, and its Undo
+            // takes it back.
+            Stage::Ai { phase } => {
+                let dir = self.dir.clone();
+                match phase {
+                    0 => {
+                        if let Ok(mut p) = craftworks_core::project::Project::open(&dir) {
+                            p.settings.ai_permission = craftworks_core::project::Permission::Edit;
+                            let _ = p.save();
+                        }
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        self.ai_rx = Some(rx);
+                        let settings = dir.join("settings");
+                        std::thread::spawn(move || {
+                            let r = match craftworks_mcp::Server::new(&dir, true) {
+                                Ok(s) => {
+                                    let mut s = s.with_settings_dir(&settings);
+                                    let read = s.call("sheet.read_range", &json!({"file": "Budget.xlsx", "range": "A1:B4"}));
+                                    let wrote = s.call("tool_call", &json!({"name": "doc.insert_table", "arguments": {"file": "Q3 report.docx", "values": [["Region", "Q3"], ["Midlands", 4242], ["Coast", 3131]], "header": true}}));
+                                    let saved = s.call("project_save", &json!({"file": "Q3 report.docx"}));
+                                    json!({"read": read, "wrote": wrote, "saved": saved})
+                                }
+                                Err(e) => json!({"error": e}),
+                            };
+                            let _ = tx.send(r);
+                        });
+                    }
+                    1 => {
+                        let got = self.ai_rx.as_ref().and_then(|r| r.try_recv().ok());
+                        let Some(r) = got else {
+                            if self.still_waiting(ctx, 30.0) {
+                                return;
+                            }
+                            self.done_waiting();
+                            self.check(false, "the AI connector answered");
+                            self.stage = Stage::DirtyClose { phase: 0 };
+                            return;
+                        };
+                        self.done_waiting();
+                        let ok = |v: &serde_json::Value| v["isError"] != json!(true);
+                        self.check(
+                            ok(&r["read"]) && r["read"].to_string().contains("1350"),
+                            "the AI reads the Q3 figures from the sheet (headless: it isn't the front tab's file)",
+                        );
+                        self.check(
+                            ok(&r["wrote"]),
+                            format!(
+                                "the AI's table goes into the open document ({})",
+                                r["wrote"]["content"][0]["text"].as_str().unwrap_or("").chars().take(120).collect::<String>()
+                            ),
+                        );
+                        self.check(!ok(&r["saved"]), "an `edit` project keeps the AI's edit for review instead of saving it");
+                        let text = Self::tab_of(app, Kind::Document)
+                            .and_then(|(_, d)| app.engine(Kind::Document).editor_mut().control(d, "document.inspect", json!({})).ok())
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
+                        self.check(text.contains("Midlands") && text.contains("4242"), "the document shows the table, live in its tab");
+                        let listed = app.ai.changed.iter().any(|c| c.path.ends_with("Q3 report.docx"));
+                        self.check(listed, "the review panel lists the document the AI changed");
+                        app.ai.review_open = true;
+                        self.wait = 10;
+                    }
+                    2 => {
+                        // Longer than WordCraft's AutoSave takes (2.5 s), which is paused meanwhile.
+                        if self.still_waiting(ctx, 4.0) {
+                            return;
+                        }
+                        self.done_waiting();
+                        let on_disk = craftworks_core::index::read_text(&dir.join("Q3 report.docx")).map(|s| format!("{s:?}")).unwrap_or_default();
+                        self.check(
+                            !on_disk.is_empty() && !on_disk.contains("Midlands"),
+                            "nothing the AI did is saved before review (AutoSave waits)",
+                        );
+                        self.screenshot(ctx, "ai-review");
+                        self.wait = 10;
+                    }
+                    3 => {
+                        let path = app.ai.changed.first().map(|c| c.path.clone());
+                        if let Some(p) = path {
+                            app.on_review(craftworks_shell::ai::ReviewAction::Undo(p));
+                        }
+                        app.ai.review_open = false;
+                        self.wait = 6;
+                    }
+                    _ => {
+                        let text = Self::tab_of(app, Kind::Document)
+                            .and_then(|(_, d)| app.engine(Kind::Document).editor_mut().control(d, "document.inspect", json!({})).ok())
+                            .map(|v| v.to_string())
+                            .unwrap_or_default();
+                        self.check(!text.contains("Midlands") && app.ai.changed.is_empty(), "Undo in the review panel takes the AI's table back");
+                        self.stage = Stage::DirtyClose { phase: 0 };
+                        self.wait = 5;
+                        return;
+                    }
+                }
+                self.stage = Stage::Ai { phase: phase + 1 };
             }
             Stage::Resize { i, frames } => {
                 let Some(size) = SIZES.get(i).copied() else {

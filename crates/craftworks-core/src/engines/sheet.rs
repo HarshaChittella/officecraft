@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 
 pub struct SheetEditor {
     app: SheetApp,
+    /// AutoSave as it was before an AI's edits paused it.
+    autosave_before: Option<bool>,
 }
 
 impl SheetEditor {
@@ -19,7 +21,7 @@ impl SheetEditor {
 
     /// GridCraft with the host's services (clipboard, panels, printing).
     pub fn with_services(services: Services) -> Self {
-        SheetEditor { app: SheetApp::new(Session::new(), services) }
+        SheetEditor { app: SheetApp::new(Session::new(), services), autosave_before: None }
     }
 
     pub fn app(&mut self) -> &mut SheetApp {
@@ -122,6 +124,30 @@ impl Editor for SheetEditor {
 
     fn run_command(&mut self, id: &str, args: Value) -> Result<Value> {
         Ok(self.app.run(id, args)?)
+    }
+
+    fn hold_autosave(&mut self, hold: bool) {
+        match (hold, self.autosave_before) {
+            (true, None) => {
+                self.autosave_before = Some(self.app.ui.autosave);
+                self.app.ui.autosave = false;
+            }
+            (false, Some(was)) => {
+                self.app.ui.autosave = was;
+                self.autosave_before = None;
+            }
+            _ => {}
+        }
+    }
+
+    fn control(&mut self, doc: DocId, method: &str, params: Value) -> std::result::Result<Value, String> {
+        use gridcraft_mcp::Backend;
+        self.activate(doc).map_err(|e| e.to_string())?;
+        let session = std::mem::replace(&mut self.app.session, gridcraft_engine::Session::new());
+        let mut h = gridcraft_mcp::Headless::with_session(session);
+        let r = h.call(method, params);
+        self.app.session = h.session;
+        r
     }
 
     fn logic(&mut self, ctx: &egui::Context) {

@@ -118,6 +118,16 @@ impl Editor for DeckEditor {
         Ok(self.app.run(id, args)?)
     }
 
+    fn control(&mut self, doc: DocId, method: &str, params: Value) -> std::result::Result<Value, String> {
+        use deckcraft_mcp::Backend;
+        self.activate(doc).map_err(|e| e.to_string())?;
+        let mut h = deckcraft_mcp::Headless::default();
+        std::mem::swap(&mut h.session, &mut self.app.session);
+        let r = h.call(method, params);
+        std::mem::swap(&mut h.session, &mut self.app.session);
+        r
+    }
+
     fn logic(&mut self, ctx: &egui::Context) {
         self.app.logic(ctx);
     }
