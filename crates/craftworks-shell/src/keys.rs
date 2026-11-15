@@ -14,6 +14,8 @@ pub enum Action {
     ReopenClosedTab,
     NextTab,
     PreviousTab,
+    ToggleSidebar,
+    SearchProject,
 }
 
 /// One window shortcut.
@@ -34,19 +36,22 @@ const fn sc(action: Action, key: Key, cmd: bool, ctrl: bool, alt: bool, shift: b
 
 /// The window's shortcuts. Each app's bindings for the same chords are listed in
 /// [`INTENDED`]; any other overlap fails the collision test.
-pub const SHORTCUTS: [Shortcut; 6] = [
+pub const SHORTCUTS: [Shortcut; 8] = [
     sc(Action::NewTab, Key::T, true, false, false, false, "New tab"),
     sc(Action::CloseTab, Key::W, true, false, false, false, "Close tab"),
     sc(Action::Open, Key::O, true, false, false, false, "Open file"),
     sc(Action::ReopenClosedTab, Key::T, true, false, true, false, "Reopen closed tab"),
     sc(Action::NextTab, Key::Tab, false, true, false, false, "Next tab"),
     sc(Action::PreviousTab, Key::Tab, false, true, false, true, "Previous tab"),
+    sc(Action::ToggleSidebar, Key::Backslash, true, false, false, false, "Show or hide the sidebar"),
+    sc(Action::SearchProject, Key::F, false, true, false, true, "Search the project"),
 ];
 
 /// App bindings the window takes over on purpose, by chord and command-id fragment (D26):
-/// ⌘T (the owner's choice: those commands stay on their ribbons), and keys that already mean
-/// the same thing in the app (close, open, next or previous document tab).
-pub const INTENDED: [(&str, &str); 5] = [("⌘T", ""), ("⌘W", "close"), ("⌘O", "open"), ("⌃TAB", "tab"), ("⌃⇧TAB", "tab")];
+/// ⌘T (the owner's choice: those commands stay on their ribbons), keys that already mean
+/// the same thing in the app (close, open, next or previous document tab), and ⌘\ for the
+/// sidebar (the brief's key; PdfCraft's Split View keeps its menu item, D40).
+pub const INTENDED: [(&str, &str); 6] = [("⌘T", ""), ("⌘W", "close"), ("⌘O", "open"), ("⌃TAB", "tab"), ("⌃⇧TAB", "tab"), ("⌘\\", "view.split")];
 
 impl Shortcut {
     pub fn chord(&self) -> Chord {

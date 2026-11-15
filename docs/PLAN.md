@@ -1,6 +1,6 @@
 # Craftworks plan
 
-Status: **approved** 2026-11-14. **Phases 0–2, 4 and 5 done**, Phase 3 done except its hand checks (Phase 5: printing on paper unverified, no printer), 2026-11-14 (decisions D1–D29; D25 look and feel awaits the owner's confirmation).
+Status: **approved** 2026-11-14. **Phases 0–2 and 4–6 done**, Phase 3 done except its hand checks (Phase 5: printing on paper unverified, no printer), 2026-11-14 (decisions D1–D29; D25 look and feel awaits the owner's confirmation).
 **Architecture changed 2026-11-14 (D23): the shell is Rust-only (eframe/winit), not Swift.** Phases 2–8 below are rewritten for it; the look and feel is specified in [design.md](design.md). Phase 2 is next. Xcode is not required.
 Companions: [decisions.md](decisions.md) (open and settled choices), [upstream-patches.md](upstream-patches.md) (hooks we need in the Craft repos).
 
@@ -222,6 +222,29 @@ Tasks
 - 6.4 Project search UI: a search field in the sidebar; clicking a result opens the file at the hit where the engine supports it.
 
 Done when: you can create a project, add one of each type, open them from the sidebar, and search across all of them.
+
+**Result (2026-11-16): done; a look by hand is left to you (below).**
+- **Projects** (`craftworks-core::project`, D38): `.craftworks/project.json` with `version`, `name`, `pinned`, `ai.instructions` and `ai.permission` (`read`, the default and what anything unknown means; `edit`; `edit_save`). Pins can't point outside the folder. A file from a newer Craftworks is shown but never overwritten. The known projects and the open one are kept in `projects.json` in the settings folder.
+- **Sidebar** (`craftworks-shell::sidebar`):
+  - ⌘\ shows or hides it (D40); it's resizable from 200 to 400 pt.
+  - The switcher has the known projects, New Project…, Open Folder as Project… and "Show all files".
+  - Below the switcher: a search field, then Pinned and Files. The tree shows supported documents with kind icons, and long names end in "…".
+  - The right-click menu has New Document/Sheet/Presentation Here, Rename… (refused while the file is open in a tab), Reveal in Finder, and Pin.
+- **Watcher** (`craftworks-core::tree`, D39): rescans every 2 s on a background thread and only reports changes. There's no new dependency: `notify` isn't in the Craft apps' set.
+- **Index** (`craftworks-core::index`): each file is read with its own app's reader (WordCraft's `open_path`, GridCraft's `open_bytes`, DeckCraft's `read_presentation_file` including tables and notes, and PdfCraft's text layer), into an in-memory token index on a background thread. Every word must match and the last also matches as a prefix. Hits are paragraphs, cells, slides or pages.
+- **Opening a hit** goes to it. The document runs Find for the word; the sheet selects the cell; the presentation goes to the slide; the PDF goes to the page (a Craftworks command, `craftworks.goToPage`, on PdfCraft's own `go_to_page`).
+- **Search shortcut:** ⌃⇧F. The design's ⇧⌘F is WordCraft's Font and PdfCraft's Advanced Search, and ⌥⌘F is WordCraft's footnote.
+- The collision test now treats `\` and `Backslash` as one key. It had been missing punctuation clashes, and that's how ⌘\ vs PdfCraft's Split View came to light.
+- `--check`: 54 checks, ALL PASS in light and dark. The new ones:
+  - the folder becomes a project;
+  - 4 files are listed and read;
+  - New Presentation Here makes a file;
+  - a saved change is found again;
+  - "payment", "north", "revenue" and "launch" each find and open their file at the hit;
+  - a pin is saved.
+  
+  Screenshots are `project-search-*.png` and `project-files-*.png`. Idle CPU in the background stays at 0.3% with the watcher on. 91 tests pass, plus 1 ignored (D31).
+- **Left to you:** create a project with New Project…, drag a file of each type into its folder in Finder, then search and right-click in the sidebar. Also confirm ⌘\ (D40).
 
 ## Phase 7: One AI connector
 

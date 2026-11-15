@@ -21,6 +21,7 @@ deckcraft-engine = { path = "vendor/deckcraft/crates/engine" }
 pdfcraft-ui-egui = { path = "vendor/pdfcraft/crates/ui-egui" }
 pdfcraft-engine = { path = "vendor/pdfcraft/crates/engine" }
 wordcraft-doc = { path = "vendor/wordcraft/crates/doc" }
+pdfcraft-render = { path = "vendor/pdfcraft/crates/render" }
 # Third-party crates already in the Craft apps' graph (same versions).
 egui = "0.37"
 egui-wgpu = "0.37"

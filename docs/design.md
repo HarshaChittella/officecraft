@@ -117,7 +117,7 @@ All chrome colours come from these, defined for light and dark. The contrast pai
 
 ## Sidebar (Phase 6)
 
-- **Header:** the project name with a switcher (⌄), and a search field (⌘⇧F) that searches across every file in the project.
+- **Header:** the project name with a switcher (⌄), and a search field (⌃⇧F; ⇧⌘F is WordCraft's Font and PdfCraft's Advanced Search) that searches across every file in the project.
 - **Sections:** Pinned, then Files, as a tree. It shows only supported types and greys out other files when "Show all files" is on.
 - **Rows:** 26 pt tall, with kind icon and name; the selected row is `surface-raised`. Files open in a tab with a single click; a tab already showing the file is brought to the front.
 - **Context menu:** New Document / Sheet / Presentation here, Rename, Reveal in Finder, Pin.

@@ -299,6 +299,24 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 - `https`, `http` and `mailto` open in the system (`open --`). Anything else is refused and logged.
 - Real printing isn't verified on this Mac: it has no printer (`lpstat: No destinations added`). Adding a virtual PDF printer is a system change, so it waits for the owner.
 
+## D38 Projects are folders with `.craftworks/project.json`. SETTLED 2026-11-16
+
+- Schema version 1: `name`, `pinned` (relative paths with `/`), `ai.instructions`, `ai.permission`.
+- Reading is lenient: missing fields take defaults; pins that leave the folder are dropped; an unknown permission becomes `read`.
+- A file whose version is newer than this build's is shown read-only and never written.
+- Writes are atomic. The list of known projects lives in Craftworks' settings, not in the folders.
+
+## D39 The project folder is polled, not watched with `notify`. SETTLED 2026-11-16
+
+- `notify` isn't in any Craft app's dependencies, and adding one needs the owner's OK. A bounded rescan every 2 s on a background thread is enough for a project folder: at most 20,000 entries and 12 levels deep; symlinks, hidden folders, `node_modules`, `target`, `__pycache__` and `Library` aren't entered.
+- It only wakes the window when something changed.
+- The index (`craftworks-core::index`) reads files with each app's own headless reader. That needs one new path dependency, `pdfcraft-render`, which is from the PdfCraft repo, so nothing outside the four repos is added. A reader that fails on a damaged file is caught, and the file is listed as "couldn't be read".
+
+## D40 Sidebar shortcuts: ⌘\ and ⌃⇧F. PROPOSED 2026-11-16 (⌘\ to confirm)
+
+- ⌘\ shows or hides the sidebar, as the brief asks. It's also PdfCraft's Split View, so the window takes it on purpose (listed in `keys::INTENDED`); Split View stays in PdfCraft's View menu.
+- Search uses ⌃⇧F, which no app binds. The design's ⇧⌘F is WordCraft's Font dialog and PdfCraft's Advanced Search, and ⌥⌘F is WordCraft's Insert Footnote.
+
 ## Upstream test results (task 0.6)
 
 Runs on 2026-11-14. Every run is logged under `plan/logs/` (gitignored), one timestamped file per run.

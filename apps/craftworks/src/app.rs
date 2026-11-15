@@ -3,11 +3,14 @@
 //! into a texture by `craftworks-render` and shown below the title row.
 
 use crate::menu::{self, MenuCommand};
-use crate::{check, session, settings, titlebar::TitleBar};
+use crate::{check, projects, session, settings, titlebar::TitleBar};
 use craftworks_core::{CloseState, DocId, Kind, Opened, TabId, Tabs};
 use craftworks_render::{EngineHost, FrameResult, embed};
 use craftworks_shell::keys::{self, Route};
-use craftworks_shell::{NewTab, NewTabAction, Palette, Recent, RecentView, TabAction, TabItem, TabStripState, Toasts, tab_strip, tokens};
+use craftworks_shell::{
+    NewTab, NewTabAction, Palette, Recent, RecentView, Sidebar, SidebarAction, SidebarView, TabAction, TabItem, TabStripState, Toasts, sidebar,
+    tab_strip, tokens,
+};
 use egui::{Event, Rect, Stroke, pos2};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -84,6 +87,9 @@ pub struct App {
     pub newtab: NewTab,
     pub toasts: Toasts,
     recent: Recent,
+    /// The project sidebar, and the projects behind it.
+    pub sidebar: Sidebar,
+    pub projects: projects::Projects,
     /// Files of recently closed tabs, for reopening.
     closed: Vec<PathBuf>,
     /// The engine area last frame (for the check's resize timing and toasts).
@@ -137,12 +143,169 @@ impl App {
             newtab: NewTab::default(),
             toasts: Toasts::default(),
             recent: settings::load_recent(),
+            sidebar: Sidebar::default(),
+            projects: projects::Projects::default(),
             closed: Vec::new(),
             content_rect: Rect::NOTHING,
             a11y,
             frames: 0,
             wake_reasons: Vec::new(),
             check: None,
+        }
+    }
+
+    /// Shows the project the window had at quit, and the sidebar if it was open.
+    pub fn restore_project(&mut self, ctx: &egui::Context) {
+        let (projects, last) = projects::Projects::load();
+        self.projects = projects;
+        self.sidebar.open = self.projects.sidebar_open;
+        if let Some(root) = last.filter(|r| craftworks_core::project::Project::exists(r))
+            && let Err(e) = self.projects.open(&root, None, ctx)
+        {
+            self.toasts.error(format!("Couldn't open the project: {e}"));
+        }
+    }
+
+    /// Makes `root` a project and shows it in the sidebar.
+    pub fn open_project(&mut self, root: &Path, name: Option<&str>, ctx: &egui::Context) {
+        match self.projects.open(root, name, ctx) {
+            Ok(()) => {
+                self.sidebar.open = true;
+                self.sidebar.query.clear();
+                self.projects.query.clear();
+                self.save_sidebar_state();
+            }
+            Err(e) => {
+                self.toasts.error(format!("Couldn't open the project: {e}"));
+            }
+        }
+    }
+
+    fn save_sidebar_state(&mut self) {
+        if self.projects.sidebar_open != self.sidebar.open {
+            self.projects.sidebar_open = self.sidebar.open;
+            self.projects.save();
+        }
+    }
+
+    /// The file of the tab in front, if it has one.
+    pub fn active_path(&self) -> Option<PathBuf> {
+        let t = self.tabs.active()?;
+        self.engine_ref(t.kind)?.editor().documents().into_iter().find(|d| d.id == t.doc)?.path
+    }
+
+    /// Whether a tab shows `path` (or a file inside it, for a folder).
+    fn is_open(&self, path: &Path) -> bool {
+        self.tabs.iter().any(|t| {
+            self.engine_ref(t.kind)
+                .and_then(|e| e.editor().documents().into_iter().find(|d| d.id == t.doc))
+                .and_then(|d| d.path)
+                .is_some_and(|p| p.starts_with(path))
+        })
+    }
+
+    /// Does what the sidebar asked.
+    pub fn on_sidebar_action(&mut self, ctx: &egui::Context, a: SidebarAction) {
+        match a {
+            SidebarAction::Open(p) => self.open(&p),
+            SidebarAction::OpenHit(hit) => {
+                let query = self.projects.query.clone();
+                self.open(&hit.path);
+                self.projects.goto = Some(projects::GoTo::new(&hit, &query));
+            }
+            SidebarAction::Search(q) => self.projects.query = q,
+            SidebarAction::NewFile { dir, kind } => self.new_file_in(&dir, kind),
+            SidebarAction::Rename { from, to_name } => self.rename(&from, &to_name),
+            SidebarAction::Reveal(p) => craftworks_platform::files::reveal(&p),
+            SidebarAction::TogglePin(p) => {
+                if let Err(e) = self.projects.toggle_pin(&p) {
+                    self.toasts.error(format!("Couldn't pin {}: {e}", file_name(&p)));
+                }
+            }
+            SidebarAction::SwitchProject(root) => self.open_project(&root, None, ctx),
+            SidebarAction::NewProject => {
+                if !self.platform.interactive {
+                    return;
+                }
+                if let Some(path) = rfd::FileDialog::new().set_title("New Project").set_file_name("New Project").save_file() {
+                    match std::fs::create_dir_all(&path) {
+                        Ok(()) => {
+                            let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+                            self.open_project(&path, name.as_deref(), ctx);
+                        }
+                        Err(e) => {
+                            self.toasts.error(format!("Couldn't make the project folder: {e}"));
+                        }
+                    }
+                }
+            }
+            SidebarAction::OpenFolder => {
+                if !self.platform.interactive {
+                    return;
+                }
+                if let Some(dir) = rfd::FileDialog::new().set_title("Open Folder as Project").pick_folder() {
+                    self.open_project(&dir, None, ctx);
+                }
+            }
+        }
+    }
+
+    /// A new, empty file of `kind` in `dir` ("Untitled Sheet 2.xlsx"…), open in a tab.
+    pub fn new_file_in(&mut self, dir: &Path, kind: Kind) {
+        let path = sidebar::new_file_name(dir, kind, |p| p.exists());
+        let made = self.engine(kind).editor_mut().new_document();
+        match made {
+            Ok(doc) => {
+                self.tabs.open(kind, doc);
+                self.known.entry(kind).or_default().insert(doc);
+                if let Err(e) = self.engine(kind).editor_mut().save_as(doc, &path) {
+                    self.toasts.error(format!("Couldn't save {}: {e}", file_name(&path)));
+                }
+            }
+            Err(e) => {
+                self.toasts.error(format!("Couldn't make a new {}: {e}", kind.label().to_lowercase()));
+            }
+        }
+    }
+
+    /// Renames a file or folder in the project. Not while a tab shows it (the app holds it).
+    pub fn rename(&mut self, from: &Path, to_name: &str) {
+        if !sidebar::valid_name(to_name) {
+            self.toasts.error(format!("“{to_name}” can't be a file name"));
+            return;
+        }
+        let Some(to) = from.parent().map(|d| d.join(to_name.trim())) else { return };
+        if self.is_open(from) {
+            self.toasts.info(format!("Close {} first: it's open in a tab", file_name(from)));
+            return;
+        }
+        if to.exists() {
+            self.toasts.error(format!("{} already exists", file_name(&to)));
+            return;
+        }
+        match std::fs::rename(from, &to) {
+            Ok(()) => self.projects.renamed(from, &to),
+            Err(e) => {
+                self.toasts.error(format!("Couldn't rename {}: {e}", file_name(from)));
+            }
+        }
+    }
+
+    /// Shows a search hit once its file's tab is in front and the document is ready.
+    fn step_goto(&mut self) {
+        let Some(mut g) = self.projects.goto.take() else { return };
+        let ready = self.active_path().is_some_and(|p| p == g.path) && self.pending_opens.is_empty();
+        if ready {
+            if let Some(kind) = Kind::for_path(&g.path)
+                && let Some((cmd, args)) = projects::goto_command(kind, &g.location, &g.query)
+                && let Err(e) = self.engine(kind).editor_mut().run_command(cmd, args)
+            {
+                log::info!("showing the search hit: {e}");
+            }
+            return;
+        }
+        if g.tick() {
+            self.projects.goto = Some(g);
         }
     }
 
@@ -754,7 +917,7 @@ impl App {
     /// filter field has focus. With tabs open and no popover the chrome has no text field, so
     /// the keyboard is the document's (a stale focus left by a closed popover doesn't count).
     fn chrome_has_keyboard(&self, ctx: &egui::Context) -> bool {
-        self.newtab.open || (self.tabs.is_empty() && ctx.egui_wants_keyboard_input())
+        self.newtab.open || self.sidebar.wants_keyboard(ctx) || (self.tabs.is_empty() && ctx.egui_wants_keyboard_input())
     }
 
     fn shortcuts(&mut self) {
@@ -779,6 +942,8 @@ impl App {
                 keys::Action::PreviousTab => {
                     self.tabs.cycle(-1);
                 }
+                keys::Action::ToggleSidebar => self.sidebar.toggle(),
+                keys::Action::SearchProject => self.sidebar.focus_search(),
             }
         }
     }
@@ -886,6 +1051,9 @@ impl eframe::App for App {
         self.sync();
         self.step_quit();
         self.save_session_if_changed();
+        self.projects.frame();
+        self.step_goto();
+        self.save_sidebar_state();
 
         let p = self.palette;
         let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
@@ -901,6 +1069,34 @@ impl eframe::App for App {
         });
         for a in actions {
             self.on_tab_action(&ctx, a);
+        }
+
+        if self.sidebar.open {
+            let pinned = self.projects.pinned();
+            let active = self.active_path();
+            let current = self.projects.current_item();
+            let read_only = self.projects.current.as_ref().is_some_and(|p| p.read_only);
+            let view = SidebarView {
+                project: current.as_ref(),
+                projects: &self.projects.items,
+                entries: &self.projects.snapshot.entries,
+                pinned: &pinned,
+                active: active.as_deref(),
+                hits: &self.projects.hits,
+                progress: &self.projects.progress,
+                read_only,
+            };
+            let sidebar = &mut self.sidebar;
+            let acts = egui::Panel::left("cw_sidebar")
+                .resizable(true)
+                .default_size(sidebar::WIDTH)
+                .size_range(sidebar::MIN_WIDTH..=sidebar::MAX_WIDTH)
+                .frame(egui::Frame::NONE.fill(p.surface))
+                .show(ui, |ui| sidebar.show(ui, &p, &view))
+                .inner;
+            for a in acts {
+                self.on_sidebar_action(&ctx, a);
+            }
         }
 
         let mut page_action = None;

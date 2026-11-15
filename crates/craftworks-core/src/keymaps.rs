@@ -56,6 +56,14 @@ pub struct AppShortcut {
 
 fn normalise_key(k: &str) -> String {
     let k = k.trim();
+    // Punctuation by its symbol, however it's spelt: egui's `Backslash` and an app's `\` are
+    // the same key.
+    if let Some(sym) = egui::Key::from_name(k).map(egui::Key::symbol_or_name)
+        && sym.len() == 1
+        && sym.chars().all(|c| c.is_ascii_punctuation())
+    {
+        return sym.to_string();
+    }
     match k.to_ascii_lowercase().as_str() {
         "esc" | "escape" => "ESCAPE".into(),
         "return" | "enter" => "ENTER".into(),
@@ -170,6 +178,7 @@ mod tests {
         assert_eq!(parse("Mod+Shift+. / Mod+Shift+>"), vec![Chord::new(".").cmd().shift(), Chord::new(">").cmd().shift()]);
         assert_eq!(parse("Alt+Tab"), vec![Chord::new("TAB").alt()]);
         assert_eq!(parse("Left"), vec![Chord::new("ARROWLEFT")]);
+        assert_eq!(Chord::new("Backslash"), Chord::new("\\"), "a key is the same key however it is spelt");
     }
 
     #[test]

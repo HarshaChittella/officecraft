@@ -41,6 +41,7 @@ enum Stage {
     DirtyClose { phase: u8 },
     Routing { phase: u8 },
     Services { phase: u8 },
+    Projects { phase: u8 },
     Resize { i: usize, frames: u32 },
     Accessibility { frames: u32 },
     Menus { phase: u8 },
@@ -635,12 +636,124 @@ impl Check {
                         }
                         self.check(pdfs > self.tries, "DeckCraft's Print opens its PDF in a Craftworks PDF tab, ready to print");
                         self.tries = 0;
-                        self.stage = Stage::DirtyClose { phase: 0 };
+                        self.stage = Stage::Projects { phase: 0 };
                         self.wait = 5;
                         return;
                     }
                 }
                 self.stage = Stage::Services { phase: phase + 1 };
+            }
+            // Phase 6: the check folder becomes a project; its files are indexed, searched and
+            // opened at their hits; a new file is made from the sidebar; a file is pinned.
+            Stage::Projects { phase } => {
+                const SEARCHES: [(&str, &str); 4] =
+                    [("payment", "Contract.pdf"), ("north", "Budget.xlsx"), ("revenue", "Q3 report.docx"), ("launch", "Untitled Presentation.pptx")];
+                let dir = self.dir.clone();
+                match phase {
+                    0 => {
+                        app.open_project(&dir, Some("Check project"), ctx);
+                        self.check(
+                            app.sidebar.open && dir.join(".craftworks/project.json").is_file(),
+                            "a folder becomes a project (.craftworks/project.json) and the sidebar shows it",
+                        );
+                        self.tries = 0;
+                        self.wait = 10;
+                    }
+                    1 => {
+                        let pr = app.projects.progress.clone();
+                        let docs = app.projects.snapshot.documents().count();
+                        if (pr.pending > 0 || pr.indexed < 4) && self.tries < 900 {
+                            self.tries += 1;
+                            return;
+                        }
+                        self.line(format!("INFO index: {} files, {} failed {:?}", pr.indexed, pr.failed.len(), pr.failed));
+                        self.check(
+                            docs >= 4 && pr.indexed >= 4,
+                            format!("the sidebar lists the project's documents and the index reads them ({docs} listed, {} read)", pr.indexed),
+                        );
+                        self.tries = 0;
+                        app.new_file_in(&dir, Kind::Presentation);
+                        self.wait = 10;
+                    }
+                    2 => {
+                        let path = app.active_path();
+                        self.check(
+                            path.as_ref().is_some_and(|p| p.ends_with("Untitled Presentation.pptx") && p.is_file()),
+                            format!("New Presentation Here makes and opens a file in the project ({path:?})"),
+                        );
+                        let ed = app.engine(Kind::Presentation).editor_mut();
+                        let _ = ed.run_command("insert.textBox", json!({"text": "Launch timeline"}));
+                        if let Some(doc) = ed.active() {
+                            let _ = ed.save(doc);
+                        }
+                        self.wait = 10;
+                    }
+                    3 => {
+                        app.projects.query = "launch".into();
+                        app.projects.frame();
+                        if app.projects.hits.is_empty() && self.tries < 900 {
+                            self.tries += 1;
+                            return;
+                        }
+                        self.check(!app.projects.hits.is_empty(), "a saved change is found by search (the folder is watched and re-read)");
+                        self.tries = 0;
+                    }
+                    4..=7 => {
+                        let (q, file) = SEARCHES[usize::from(phase - 4)];
+                        if self.tries == 0 {
+                            app.sidebar.query = q.into();
+                            app.projects.query = q.into();
+                            app.projects.frame();
+                            let hit = app.projects.hits.iter().find(|h| h.path.ends_with(file)).cloned();
+                            match hit {
+                                Some(h) => {
+                                    self.line(format!("INFO “{q}”: {} hits; opening {} at {:?}", app.projects.hits.len(), file, h.location));
+                                    app.on_sidebar_action(ctx, craftworks_shell::SidebarAction::OpenHit(h));
+                                }
+                                None => {
+                                    self.check(false, format!("searching “{q}” finds {file}"));
+                                    self.stage = Stage::Projects { phase: phase + 1 };
+                                    return;
+                                }
+                            }
+                        }
+                        let at = app.active_path().is_some_and(|p| p.ends_with(file));
+                        if (!at || app.projects.goto.is_some()) && self.tries < 900 {
+                            self.tries += 1;
+                            return;
+                        }
+                        self.check(at, format!("searching “{q}” finds {file}, and the hit opens it in a tab"));
+                        if phase == 4 {
+                            self.screenshot(ctx, "project-search");
+                        }
+                        self.tries = 0;
+                        self.wait = 6;
+                    }
+                    8 => {
+                        let pdf = dir.join("Contract.pdf");
+                        app.on_sidebar_action(ctx, craftworks_shell::SidebarAction::TogglePin(pdf.clone()));
+                        let saved = craftworks_core::project::Project::open(&dir).map(|p| p.settings.pinned).unwrap_or_default();
+                        self.check(saved == vec!["Contract.pdf".to_string()], format!("Pin keeps the file in project.json ({saved:?})"));
+                        app.sidebar.query.clear();
+                        app.projects.query.clear();
+                        self.wait = 8;
+                    }
+                    9 => {
+                        self.screenshot(ctx, "project-files");
+                        // Back to how the later stages expect the window: the new file's tab closed.
+                        let new_tab = app.tabs.active().filter(|t| t.kind == Kind::Presentation).map(|t| t.id);
+                        if let Some(id) = new_tab {
+                            app.close_tab(id);
+                        }
+                        self.wait = 10;
+                    }
+                    _ => {
+                        self.stage = Stage::DirtyClose { phase: 0 };
+                        self.wait = 5;
+                        return;
+                    }
+                }
+                self.stage = Stage::Projects { phase: phase + 1 };
             }
             Stage::Resize { i, frames } => {
                 let Some(size) = SIZES.get(i).copied() else {

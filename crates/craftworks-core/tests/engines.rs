@@ -282,3 +282,38 @@ fn typing_reaches_the_document() {
         assert!(text.contains("Typed."), "{label}: {text}");
     }
 }
+
+/// The project index reads one file of each kind with its app's own reader.
+#[test]
+fn the_index_reads_every_kind() {
+    use craftworks_core::index::{Location, read_text};
+    let dir = scratch("index");
+    let ctx = egui::Context::default();
+    let make = |kind: Kind, name: &str, edits: Vec<(&str, serde_json::Value)>| {
+        let mut ed = new_editor(kind);
+        frames(&ctx, ed.as_mut(), 2);
+        let doc = ed.new_document().unwrap();
+        frames(&ctx, ed.as_mut(), 2);
+        for (id, args) in edits {
+            ed.run_command(id, args).unwrap();
+            frames(&ctx, ed.as_mut(), 1);
+        }
+        ed.save_as(doc, &dir.join(name)).unwrap();
+        frames(&ctx, ed.as_mut(), 2);
+    };
+    make(Kind::Document, "memo.docx", vec![("text.insert", json!({"text": "Quarterly heron count"}))]);
+    make(Kind::Sheet, "birds.xlsx", vec![("cell.set", json!({"cell": "B3", "input": "Kingfisher"}))]);
+    make(Kind::Presentation, "talk.pptx", vec![("slide.new", json!({})), ("insert.textBox", json!({"text": "Wetland survey"}))]);
+    let pdf = pdfcraft_engine::Session::new().create_from_text("Notes", "Osprey nests by the river").unwrap();
+    std::fs::write(dir.join("notes.pdf"), pdf.as_slice()).unwrap();
+
+    let find = |name: &str, word: &str| -> Location {
+        let sections = read_text(&dir.join(name)).unwrap_or_else(|e| panic!("{name}: {e}"));
+        sections.into_iter().find(|(_, t)| t.contains(word)).unwrap_or_else(|| panic!("{name}: no {word:?}")).0
+    };
+    assert!(matches!(find("memo.docx", "heron"), Location::Paragraph(_)));
+    assert_eq!(find("birds.xlsx", "Kingfisher"), Location::Cell { sheet: "Sheet1".into(), cell: "B3".into() });
+    assert!(matches!(find("talk.pptx", "Wetland"), Location::Slide { notes: false, .. }));
+    assert_eq!(find("notes.pdf", "Osprey"), Location::Page(0));
+    assert!(read_text(&dir.join("missing.docx")).is_err());
+}

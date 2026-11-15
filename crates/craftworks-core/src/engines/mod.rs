@@ -8,7 +8,7 @@ mod sheet;
 mod word;
 
 pub use deck::DeckEditor;
-pub use pdf::PdfEditor;
+pub use pdf::{GO_TO_PAGE, PdfEditor};
 pub use sheet::SheetEditor;
 pub use word::WordEditor;
 

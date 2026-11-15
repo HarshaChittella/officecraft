@@ -10,6 +10,9 @@ use pdfcraft_ui_egui::{OpenOutcome, PdfCraftApp, SaveTarget};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 
+/// Shows a page (0-based) of the active PDF: `{"page": n}`. Craftworks' own command.
+pub const GO_TO_PAGE: &str = "craftworks.goToPage";
+
 pub struct PdfEditor {
     app: PdfCraftApp,
 }
@@ -114,7 +117,14 @@ impl Editor for PdfEditor {
         self.app.set_theme_preference(if dark { ThemePreference::Dark } else { ThemePreference::Light });
     }
 
-    fn run_command(&mut self, id: &str, _args: Value) -> Result<Value> {
+    fn run_command(&mut self, id: &str, args: Value) -> Result<Value> {
+        if id == GO_TO_PAGE {
+            // Ours, not PdfCraft's (its catalogue has no page argument): a search hit's page.
+            let page = args.get("page").and_then(Value::as_u64).ok_or_else(|| EditorError("craftworks.goToPage needs {page}".into()))?;
+            let view = self.app.active.and_then(|i| self.app.views.get_mut(i)).ok_or_else(|| EditorError("no PDF is open".into()))?;
+            view.go_to_page(usize::try_from(page).unwrap_or(usize::MAX));
+            return Ok(json!({"page": page}));
+        }
         // PdfCraft's catalogue commands take no arguments; they act on the active tab.
         self.app.run_command(id);
         Ok(json!({}))

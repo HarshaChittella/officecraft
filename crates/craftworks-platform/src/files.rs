@@ -32,6 +32,16 @@ pub fn openable(url: &str) -> bool {
 }
 
 /// Opens a link with the system's default app (`open`, macOS).
+/// Shows `path` selected in a Finder window.
+pub fn reveal(path: &std::path::Path) {
+    #[cfg(target_os = "macos")]
+    if let Err(e) = std::process::Command::new("open").arg("-R").arg("--").arg(path).spawn() {
+        log::warn!("revealing {}: {e}", path.display());
+    }
+    #[cfg(not(target_os = "macos"))]
+    log::info!("reveal {}: not on this system", path.display());
+}
+
 pub fn open_url(url: &str) {
     if !openable(url) {
         log::warn!("not opening {url:?}: only web, mail and file links open");

@@ -1695,6 +1695,7 @@ dependencies = [
  "gridcraft-ui-egui",
  "log",
  "pdfcraft-engine",
+ "pdfcraft-render",
  "pdfcraft-ui-egui",
  "serde_json",
  "wordcraft-doc",

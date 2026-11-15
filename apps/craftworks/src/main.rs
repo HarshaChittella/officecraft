@@ -15,6 +15,7 @@ mod app;
 mod check;
 mod logger;
 mod menu;
+mod projects;
 mod session;
 mod settings;
 mod titlebar;
@@ -80,8 +81,14 @@ fn main() -> eframe::Result {
             }
             match check_dir {
                 Some(dir) => app = app.with_check(check::Check::new(dir, forced_dark)),
-                None if files.is_empty() => app.restore_session(),
-                None => files.iter().for_each(|f| app.open(f)),
+                None if files.is_empty() => {
+                    app.restore_project(&cc.egui_ctx);
+                    app.restore_session();
+                }
+                None => {
+                    app.restore_project(&cc.egui_ctx);
+                    files.iter().for_each(|f| app.open(f));
+                }
             }
             Ok(Box::new(app))
         }),
