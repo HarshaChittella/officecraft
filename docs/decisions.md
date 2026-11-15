@@ -317,6 +317,16 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 - The brief's ⌘\ is PdfCraft's Split View, and the owner chose not to take it. The sidebar uses ⌃⌘S, macOS's standard Show Sidebar key (Finder, Mail, Notes), which no Craft app binds.
 - Search uses ⌃⇧F, which no app binds. The design's ⇧⌘F is WordCraft's Font dialog and PdfCraft's Advanced Search, and ⌥⌘F is WordCraft's Insert Footnote.
 
+## D41 Projects are tab groups; the sidebar stays. SETTLED 2026-11-16 (owner's decision)
+
+- Each open project is one tab group: a coloured label, the project's tabs together after it, and a line of its colour under them. Several projects can be open at once.
+- A tab's group comes from its file: the open project whose folder holds it. Dragging can't move a tab out of its group, because its file decides the group. Untitled documents join a group once saved inside a project.
+- The sidebar shows one project: the front tab's, or the one picked in it.
+
+## D42 The menu bar follows the front tab. PROPOSED 2026-11-16
+
+- See PLAN.md Phase 6c. No upstream change: menus come from each app's command catalogue (PdfCraft's from its library).
+
 ## Upstream test results (task 0.6)
 
 Runs on 2026-11-14. Every run is logged under `plan/logs/` (gitignored), one timestamped file per run.

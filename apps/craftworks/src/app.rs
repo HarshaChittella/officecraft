@@ -90,6 +90,10 @@ pub struct App {
     /// The project sidebar, and the projects behind it.
     pub sidebar: Sidebar,
     pub projects: projects::Projects,
+    /// Projects being closed from their group's menu, waiting for their tabs to close.
+    closing_projects: Vec<PathBuf>,
+    /// The front tab (and its group) when groups were last synced.
+    last_front: Option<(TabId, Option<craftworks_core::GroupId>)>,
     /// Files of recently closed tabs, for reopening.
     closed: Vec<PathBuf>,
     /// The engine area last frame (for the check's resize timing and toasts).
@@ -145,6 +149,8 @@ impl App {
             recent: settings::load_recent(),
             sidebar: Sidebar::default(),
             projects: projects::Projects::default(),
+            closing_projects: Vec::new(),
+            last_front: None,
             closed: Vec::new(),
             content_rect: Rect::NOTHING,
             a11y,
@@ -156,14 +162,97 @@ impl App {
 
     /// Shows the project the window had at quit, and the sidebar if it was open.
     pub fn restore_project(&mut self, ctx: &egui::Context) {
-        let (projects, last) = projects::Projects::load();
+        let (projects, restore) = projects::Projects::load();
         self.projects = projects;
         self.sidebar.open = self.projects.sidebar_open;
-        if let Some(root) = last.filter(|r| craftworks_core::project::Project::exists(r))
-            && let Err(e) = self.projects.open(&root, None, ctx)
-        {
-            self.toasts.error(format!("Couldn't open the project: {e}"));
+        for root in restore.open.iter().filter(|r| craftworks_core::project::Project::exists(r)) {
+            if let Err(e) = self.projects.open(root, None, ctx) {
+                self.toasts.error(format!("Couldn't open the project: {e}"));
+            }
         }
+        if let Some(c) = &restore.current {
+            self.projects.select_root(c);
+        }
+        self.sync_groups();
+    }
+
+    /// Keeps the tab groups in step with the open projects (one group each, its name and colour
+    /// from `project.json`), and each tab in the group of the project that holds its file. The
+    /// sidebar follows the front tab's project.
+    fn sync_groups(&mut self) {
+        let open: Vec<(String, String, Option<String>, PathBuf)> = self
+            .projects
+            .open
+            .iter()
+            .map(|o| {
+                (
+                    o.project.root.to_string_lossy().into_owned(),
+                    o.project.settings.name.clone(),
+                    o.project.settings.color.clone(),
+                    o.project.root.clone(),
+                )
+            })
+            .collect();
+        let stale: Vec<craftworks_core::GroupId> = self.tabs.groups().filter(|g| !open.iter().any(|o| o.0 == g.key)).map(|g| g.id).collect();
+        for g in stale {
+            self.tabs.remove_group(g);
+        }
+        for (n, (key, name, color, root)) in open.iter().enumerate() {
+            let color = color
+                .as_deref()
+                .and_then(|c| tokens::GROUP_NAMES.iter().position(|g| g.eq_ignore_ascii_case(c)))
+                .map_or((n % (tokens::GROUP_NAMES.len() - 1) + 1) as u8, |i| i as u8);
+            let fresh = self.tabs.group_by_key(key).is_none();
+            let id = self.tabs.add_group(key, name, color);
+            if let Some(g) = self.tabs.group_mut(id) {
+                g.name.clone_from(name);
+                g.color = color;
+            }
+            if fresh && self.projects.collapsed.contains(root) {
+                let _ = self.tabs.set_collapsed(id, true);
+            }
+        }
+        let tabs: Vec<(TabId, Option<craftworks_core::GroupId>, Kind, DocId)> = self.tabs.iter().map(|t| (t.id, t.group, t.kind, t.doc)).collect();
+        for (id, group, kind, doc) in tabs {
+            let path = self.engine_ref(kind).and_then(|e| e.editor().documents().into_iter().find(|d| d.id == doc)).and_then(|d| d.path);
+            let want = path.as_deref().and_then(|p| self.projects.owner_of(p)).and_then(|p| self.tabs.group_by_key(&p.root.to_string_lossy()));
+            if want != group {
+                self.tabs.set_group(id, want);
+            }
+        }
+        // When another tab comes to the front, the sidebar shows its project (and stays on
+        // what was picked in it otherwise).
+        let front_tab = self.tabs.active().map(|t| (t.id, t.group));
+        if front_tab != self.last_front {
+            self.last_front = front_tab;
+            let front = front_tab.and_then(|(_, g)| g).and_then(|g| self.tabs.group(g)).map(|g| PathBuf::from(&g.key));
+            if let Some(root) = front {
+                self.projects.select_root(&root);
+            }
+        }
+        // Projects whose close was asked for: closed once their tabs are gone; kept if a tab's
+        // close was cancelled.
+        for root in std::mem::take(&mut self.closing_projects) {
+            let g = self.tabs.group_by_key(&root.to_string_lossy());
+            let left = g.map(|g| self.tabs.in_group(g)).unwrap_or_default();
+            if left.is_empty() {
+                self.projects.close(&root);
+                if let Some(g) = g {
+                    self.tabs.remove_group(g);
+                }
+            } else if left.iter().any(|t| self.closing.iter().any(|c| c.tab == *t)) {
+                self.closing_projects.push(root);
+            }
+        }
+    }
+
+    /// The group items for the strip.
+    fn group_items(&self) -> Vec<craftworks_shell::GroupItem> {
+        self.tabs.groups().map(|g| craftworks_shell::GroupItem { id: g.id.0, name: g.name.clone(), color: g.color, collapsed: g.collapsed }).collect()
+    }
+
+    fn group_root(&self, id: u64) -> Option<PathBuf> {
+        self.tabs.group(craftworks_core::GroupId(id)).map(|g| PathBuf::from(&g.key))
     }
 
     /// Makes `root` a project and shows it in the sidebar.
@@ -192,6 +281,19 @@ impl App {
     pub fn active_path(&self) -> Option<PathBuf> {
         let t = self.tabs.active()?;
         self.engine_ref(t.kind)?.editor().documents().into_iter().find(|d| d.id == t.doc)?.path
+    }
+
+    /// The tab that shows `path`, if any.
+    pub fn tab_for_path(&self, path: &Path) -> Option<TabId> {
+        self.tabs
+            .iter()
+            .find(|t| {
+                self.engine_ref(t.kind)
+                    .and_then(|e| e.editor().documents().into_iter().find(|d| d.id == t.doc))
+                    .and_then(|d| d.path)
+                    .is_some_and(|p| p == path)
+            })
+            .map(|t| t.id)
     }
 
     /// Whether a tab shows `path` (or a file inside it, for a folder).
@@ -545,6 +647,16 @@ impl App {
             self.toasts.error(format!("Craftworks can't open {} files", ext));
             return;
         };
+        // Already open: its tab comes to the front (DeckCraft would open a second copy).
+        if let Some(id) = self.tab_for_path(path) {
+            self.tabs.activate(id);
+            self.recent.opened(path, chrono::Local::now().timestamp());
+            settings::save_recent(&self.recent);
+            return;
+        }
+        if self.pending_opens.iter().any(|(_, p)| p == path) {
+            return;
+        }
         match self.engine(kind).editor_mut().open(path) {
             Ok(Opened::Now(doc)) => {
                 self.tabs.open(kind, doc);
@@ -711,6 +823,7 @@ impl App {
                     path: info.as_ref().and_then(|d| d.path.clone()),
                     dirty: info.is_some_and(|d| d.dirty),
                     busy: false,
+                    group: t.group.map(|g| g.0),
                 }
             })
             .collect();
@@ -722,12 +835,13 @@ impl App {
                 path: Some(path.clone()),
                 dirty: false,
                 busy: true,
+                group: None,
             });
         }
         items
     }
 
-    fn on_tab_action(&mut self, ctx: &egui::Context, a: TabAction) {
+    pub fn on_tab_action(&mut self, ctx: &egui::Context, a: TabAction) {
         let tab = |id: u64| TabId(id);
         match a {
             TabAction::Activate(id) => {
@@ -778,7 +892,57 @@ impl App {
                 let max = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
                 ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
             }
+            TabAction::ToggleGroup(id) => self.toggle_group(id),
+            TabAction::RenameGroup { id, name } => {
+                if let Some(root) = self.group_root(id)
+                    && let Err(e) = self.projects.set_name(&root, &name)
+                {
+                    self.toasts.error(format!("Couldn't rename the project: {e}"));
+                }
+            }
+            TabAction::SetGroupColor { id, color } => {
+                if let Some(root) = self.group_root(id)
+                    && let Some(name) = tokens::GROUP_NAMES.get(usize::from(color))
+                    && let Err(e) = self.projects.set_color(&root, name)
+                {
+                    self.toasts.error(format!("Couldn't change the project's colour: {e}"));
+                }
+            }
+            TabAction::ShowGroup(id) => {
+                if let Some(root) = self.group_root(id) {
+                    self.projects.select_root(&root);
+                    self.sidebar.open = true;
+                }
+            }
+            TabAction::CloseGroup(id) => {
+                if let Some(root) = self.group_root(id) {
+                    self.close_project(&root);
+                }
+            }
         }
+    }
+
+    /// Collapses or expands a project's tab group.
+    pub fn toggle_group(&mut self, id: u64) {
+        let gid = craftworks_core::GroupId(id);
+        let Some(collapsed) = self.tabs.group(gid).map(|g| !g.collapsed) else { return };
+        if self.tabs.set_collapsed(gid, collapsed) {
+            if let Some(root) = self.group_root(id) {
+                self.projects.set_collapsed(&root, collapsed);
+            }
+        } else {
+            self.toasts.info("It's the only open tab, so its group stays open");
+        }
+    }
+
+    /// Closes a project: each of its tabs through its app's own close (which may ask to save),
+    /// then the project. A cancelled close keeps the project open.
+    pub fn close_project(&mut self, root: &Path) {
+        let ids = self.tabs.group_by_key(&root.to_string_lossy()).map(|g| self.tabs.in_group(g)).unwrap_or_default();
+        for id in ids {
+            self.close_tab(id);
+        }
+        self.closing_projects.push(root.to_path_buf());
     }
 
     fn on_newtab_action(&mut self, a: NewTabAction) {
@@ -1051,6 +1215,7 @@ impl eframe::App for App {
         self.sync();
         self.step_quit();
         self.save_session_if_changed();
+        self.sync_groups();
         self.projects.frame();
         self.step_goto();
         self.save_sidebar_state();
@@ -1064,8 +1229,9 @@ impl eframe::App for App {
             ui.painter().hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, p.hairline));
             let strip = Rect::from_min_max(pos2(r.left() + tb.content_left, r.top()), pos2(r.right() - 12.0, r.bottom()));
             let items = self.tab_items();
+            let groups = self.group_items();
             let active = self.tabs.active().map(|t| t.id.0);
-            actions = tab_strip(ui, strip, &p, &items, active, &mut self.strip);
+            actions = tab_strip(ui, strip, &p, &items, &groups, active, &mut self.strip);
         });
         for a in actions {
             self.on_tab_action(&ctx, a);
@@ -1075,11 +1241,11 @@ impl eframe::App for App {
             let pinned = self.projects.pinned();
             let active = self.active_path();
             let current = self.projects.current_item();
-            let read_only = self.projects.current.as_ref().is_some_and(|p| p.read_only);
+            let read_only = self.projects.project().is_some_and(|p| p.read_only);
             let view = SidebarView {
                 project: current.as_ref(),
                 projects: &self.projects.items,
-                entries: &self.projects.snapshot.entries,
+                entries: self.projects.current_open().map_or(&[][..], |o| &o.snapshot.entries),
                 pinned: &pinned,
                 active: active.as_deref(),
                 hits: &self.projects.hits,

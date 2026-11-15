@@ -16,6 +16,6 @@ pub mod tokens;
 pub use newtab::{NewTab, NewTabAction, RecentView};
 pub use recent::{Recent, RecentFile};
 pub use sidebar::{ProjectItem, Sidebar, SidebarAction, SidebarView};
-pub use tabs::{TabAction, TabItem, TabStripState, tab_strip};
+pub use tabs::{GroupItem, TabAction, TabItem, TabStripState, tab_strip};
 pub use toast::Toasts;
 pub use tokens::Palette;

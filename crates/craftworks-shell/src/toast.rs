@@ -46,6 +46,11 @@ impl Toasts {
         self.next
     }
 
+    /// The texts of the toasts waiting or showing (for checks).
+    pub fn texts(&self) -> Vec<String> {
+        self.list.iter().map(|t| t.text.clone()).collect()
+    }
+
     pub fn is_empty(&self) -> bool {
         self.list.is_empty()
     }

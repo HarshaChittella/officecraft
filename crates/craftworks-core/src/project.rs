@@ -54,6 +54,8 @@ pub struct Settings {
     pub pinned: Vec<String>,
     pub ai_instructions: String,
     pub ai_permission: Permission,
+    /// The tab group's colour, by name (`blue`…); `None` lets the window choose.
+    pub color: Option<String>,
 }
 
 impl Settings {
@@ -63,6 +65,7 @@ impl Settings {
             "name": self.name,
             "pinned": self.pinned,
             "ai": {"instructions": self.ai_instructions, "permission": self.ai_permission.as_str()},
+            "color": self.color,
         })
     }
 
@@ -91,7 +94,12 @@ impl Settings {
             ai_instructions.truncate(cut);
         }
         let ai_permission = ai.and_then(|a| a.get("permission")).and_then(Value::as_str).map_or(Permission::Read, Permission::parse);
-        (Settings { name, pinned, ai_instructions, ai_permission }, version)
+        let color = v
+            .get("color")
+            .and_then(Value::as_str)
+            .filter(|c| c.len() <= 20 && c.chars().all(|ch| ch.is_ascii_alphabetic()))
+            .map(str::to_ascii_lowercase);
+        (Settings { name, pinned, ai_instructions, ai_permission, color }, version)
     }
 }
 
@@ -226,8 +234,13 @@ mod tests {
 
     #[test]
     fn settings_round_trip_and_junk_takes_defaults() {
-        let s =
-            Settings { name: "Q3".into(), pinned: vec!["a/b.docx".into()], ai_instructions: "Be brief.".into(), ai_permission: Permission::EditSave };
+        let s = Settings {
+            name: "Q3".into(),
+            pinned: vec!["a/b.docx".into()],
+            ai_instructions: "Be brief.".into(),
+            ai_permission: Permission::EditSave,
+            color: Some("green".into()),
+        };
         assert_eq!(Settings::from_json(&s.to_json()), (s, SCHEMA_VERSION));
         let junk = json!({"name": 3, "pinned": ["ok.pdf", "../escape.pdf", "/abs.pdf", 7, "a//b"], "ai": {"permission": "root"}});
         let (j, v) = Settings::from_json(&junk);

@@ -1,6 +1,6 @@
-//! The window's projects: the known ones (`projects.json` in the settings folder), the one in
-//! the sidebar, its files (a polling watcher) and its search index, and where a search hit
-//! asked to go once its file is open.
+//! The window's projects: the known ones (`projects.json` in the settings folder), the open
+//! ones (a tab group each, with a polling watcher and a search index), the one the sidebar
+//! shows, and where a search hit asked to go once its file is open.
 
 use crate::settings;
 use craftworks_core::Kind;
@@ -27,46 +27,76 @@ pub struct GoTo {
     pub frames: u32,
 }
 
+/// A project open in the window: one tab group, its files and its search index.
+pub struct OpenProject {
+    pub project: Project,
+    pub snapshot: Snapshot,
+    pub progress: Progress,
+    watcher: Watcher,
+    indexer: Indexer,
+}
+
 #[derive(Default)]
 pub struct Projects {
-    pub current: Option<Project>,
+    /// The open projects, in the order they were opened.
+    pub open: Vec<OpenProject>,
+    /// The one the sidebar shows (an index into `open`).
+    pub current: Option<usize>,
     /// Known project folders, most recent first.
     pub known: Vec<PathBuf>,
     pub items: Vec<ProjectItem>,
-    pub snapshot: Snapshot,
-    watcher: Option<Watcher>,
-    indexer: Option<Indexer>,
     pub hits: Vec<Hit>,
-    hits_for: Option<(String, Progress)>,
+    hits_for: Option<(PathBuf, String, Progress)>,
     pub query: String,
+    /// The current project's indexing progress.
     pub progress: Progress,
     pub goto: Option<GoTo>,
     /// The sidebar was open at quit.
     pub sidebar_open: bool,
+    /// Projects whose tab group was collapsed at quit.
+    pub collapsed: Vec<PathBuf>,
+}
+
+/// What `projects.json` says to bring back.
+pub struct Restore {
+    pub open: Vec<PathBuf>,
+    pub current: Option<PathBuf>,
 }
 
 impl Projects {
-    /// The known projects and the last one, from `projects.json`.
-    pub fn load() -> (Projects, Option<PathBuf>) {
+    /// The known projects, and the ones that were open, from `projects.json`.
+    pub fn load() -> (Projects, Restore) {
         let v: Value = settings::dir()
             .and_then(|d| std::fs::read(d.join("projects.json")).ok())
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or(Value::Null);
-        let known: Vec<PathBuf> =
-            v.get("projects").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(PathBuf::from).take(MAX_KNOWN).collect();
+        let paths = |key: &str| -> Vec<PathBuf> {
+            v.get(key).and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(PathBuf::from).take(MAX_KNOWN).collect()
+        };
+        let known = paths("projects");
         let current = v.get("current").and_then(Value::as_str).map(PathBuf::from);
+        // Before tab groups only one project was open: the current one.
+        let mut open = paths("open");
+        if v.get("open").is_none()
+            && let Some(c) = &current
+        {
+            open.push(c.clone());
+        }
         let sidebar_open = v.get("sidebar").and_then(Value::as_bool).unwrap_or(false);
-        let mut p = Projects { known, sidebar_open, ..Projects::default() };
+        let mut p = Projects { known, sidebar_open, collapsed: paths("collapsed"), ..Projects::default() };
         p.refresh_items();
-        (p, current)
+        (p, Restore { open, current })
     }
 
     pub fn save(&self) {
         let Some(d) = settings::dir() else { return };
+        let roots = |it: &mut dyn Iterator<Item = &PathBuf>| it.map(|p| p.to_string_lossy().into_owned()).collect::<Vec<_>>();
         let v = json!({
             "version": 1,
-            "projects": self.known.iter().map(|p| p.to_string_lossy()).collect::<Vec<_>>(),
-            "current": self.current.as_ref().map(|p| p.root.to_string_lossy().into_owned()),
+            "projects": roots(&mut self.known.iter()),
+            "open": roots(&mut self.open.iter().map(|o| &o.project.root)),
+            "current": self.project().map(|p| p.root.to_string_lossy().into_owned()),
+            "collapsed": roots(&mut self.collapsed.iter()),
             "sidebar": self.sidebar_open,
         });
         if let Err(e) = settings::write_atomic(&d.join("projects.json"), v.to_string().as_bytes()) {
@@ -88,73 +118,156 @@ impl Projects {
             .collect();
     }
 
-    /// Makes `root` a project if it isn't one, and shows it.
+    /// The project the sidebar shows.
+    pub fn project(&self) -> Option<&Project> {
+        self.current_open().map(|o| &o.project)
+    }
+
+    pub fn current_open(&self) -> Option<&OpenProject> {
+        self.current.and_then(|i| self.open.get(i))
+    }
+
+    fn index_of(&self, root: &Path) -> Option<usize> {
+        self.open.iter().position(|o| o.project.root == root)
+    }
+
+    /// The open project whose folder holds `path` (the innermost, if they nest).
+    pub fn owner_of(&self, path: &Path) -> Option<&Project> {
+        self.open.iter().map(|o| &o.project).filter(|p| path.starts_with(&p.root)).max_by_key(|p| p.root.components().count())
+    }
+
+    /// Makes `root` a project if it isn't one, opens it (a watcher and an index of its own) and
+    /// makes it the sidebar's. Already open: just the sidebar's.
     pub fn open(&mut self, root: &Path, name: Option<&str>, ctx: &egui::Context) -> Result<(), String> {
+        if let Some(i) = self.index_of(root) {
+            self.select(i);
+            return Ok(());
+        }
         let project = Project::create(root, name).map_err(|e| e.to_string())?;
         let root = project.root.clone();
         self.known.retain(|k| *k != root);
         self.known.insert(0, root.clone());
         self.known.truncate(MAX_KNOWN);
-        self.current = Some(project);
-        self.snapshot = Snapshot::default();
-        self.hits.clear();
-        self.hits_for = None;
-        self.progress = Progress::default();
         let wake = ctx.clone();
-        self.watcher = Some(Watcher::start(root, RESCAN, Limits::default(), move || wake.request_repaint()));
+        let watcher = Watcher::start(root, RESCAN, Limits::default(), move || wake.request_repaint());
         let wake = ctx.clone();
-        self.indexer = Some(Indexer::start(move || wake.request_repaint()));
+        let indexer = Indexer::start(move || wake.request_repaint());
+        self.open.push(OpenProject { project, snapshot: Snapshot::default(), progress: Progress::default(), watcher, indexer });
+        self.select(self.open.len() - 1);
         self.refresh_items();
         self.save();
         Ok(())
     }
 
-    /// Takes the watcher's news to the index, and refreshes the search results.
-    pub fn frame(&mut self) {
-        if let Some(snap) = self.watcher.as_ref().and_then(Watcher::latest) {
-            if let Some(ix) = &self.indexer {
-                ix.update(snap.clone());
-            }
-            self.snapshot = snap;
+    /// Shows open project `i` in the sidebar.
+    pub fn select(&mut self, i: usize) {
+        if i < self.open.len() && self.current != Some(i) {
+            self.current = Some(i);
+            self.hits.clear();
+            self.hits_for = None;
+            self.save();
         }
-        let Some(ix) = &self.indexer else { return };
-        self.progress = ix.progress();
-        let key = (self.query.clone(), self.progress.clone());
+    }
+
+    pub fn select_root(&mut self, root: &Path) {
+        if let Some(i) = self.index_of(root) {
+            self.select(i);
+        }
+    }
+
+    /// Closes a project (its watcher and index stop); its tabs are the window's business.
+    pub fn close(&mut self, root: &Path) {
+        let Some(i) = self.index_of(root) else { return };
+        self.open.remove(i);
+        self.current = match self.current {
+            Some(c) if c == i => (!self.open.is_empty()).then(|| i.min(self.open.len() - 1)),
+            Some(c) if c > i => Some(c - 1),
+            c => c,
+        };
+        self.hits.clear();
+        self.hits_for = None;
+        self.collapsed.retain(|c| c != root);
+        self.save();
+    }
+
+    /// Takes each watcher's news to its index, and refreshes the search results.
+    pub fn frame(&mut self) {
+        for o in &mut self.open {
+            if let Some(snap) = o.watcher.latest() {
+                o.indexer.update(snap.clone());
+                o.snapshot = snap;
+            }
+            o.progress = o.indexer.progress();
+        }
+        let Some(o) = self.current.and_then(|i| self.open.get(i)) else {
+            self.progress = Progress::default();
+            self.hits.clear();
+            return;
+        };
+        self.progress = o.progress.clone();
+        let key = (o.project.root.clone(), self.query.clone(), self.progress.clone());
         if self.hits_for.as_ref() != Some(&key) {
-            self.hits = if self.query.trim().is_empty() { Vec::new() } else { ix.search(&self.query, craftworks_shell::sidebar::MAX_HITS) };
+            self.hits = if self.query.trim().is_empty() { Vec::new() } else { o.indexer.search(&self.query, craftworks_shell::sidebar::MAX_HITS) };
             self.hits_for = Some(key);
         }
     }
 
-    /// The pinned files that still exist.
+    /// The current project's pinned files that still exist.
     pub fn pinned(&self) -> Vec<PathBuf> {
-        let Some(p) = &self.current else { return Vec::new() };
+        let Some(p) = self.project() else { return Vec::new() };
         p.settings.pinned.iter().filter_map(|r| p.absolute(r)).filter(|a| a.is_file()).collect()
     }
 
-    pub fn toggle_pin(&mut self, path: &Path) -> Result<bool, String> {
-        let p = self.current.as_mut().ok_or("no project is open")?;
+    /// Changes the project that holds `path` and saves it.
+    fn edit_owner(&mut self, path: &Path, f: impl FnOnce(&mut Project)) -> Result<(), String> {
+        let i = self
+            .open
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| path.starts_with(&o.project.root))
+            .max_by_key(|(_, o)| o.project.root.components().count())
+            .map(|(i, _)| i)
+            .ok_or("that file isn't in an open project")?;
+        let p = &mut self.open[i].project;
         if p.read_only {
             return Err("this project was saved by a newer Craftworks".into());
         }
-        let pinned = p.toggle_pin(path);
-        p.save().map_err(|e| e.to_string())?;
-        Ok(pinned)
+        f(p);
+        p.save().map_err(|e| e.to_string())
+    }
+
+    pub fn toggle_pin(&mut self, path: &Path) -> Result<(), String> {
+        self.edit_owner(path, |p| {
+            p.toggle_pin(path);
+        })
     }
 
     pub fn renamed(&mut self, from: &Path, to: &Path) {
-        if let Some(p) = self.current.as_mut()
-            && !p.read_only
-        {
-            p.renamed(from, to);
-            if let Err(e) = p.save() {
-                log::warn!("saving the project after a rename: {e}");
-            }
+        if let Err(e) = self.edit_owner(from, |p| p.renamed(from, to)) {
+            log::info!("pins after a rename: {e}");
         }
     }
 
+    pub fn set_name(&mut self, root: &Path, name: &str) -> Result<(), String> {
+        self.edit_owner(root, |p| p.settings.name = name.to_string())?;
+        self.refresh_items();
+        Ok(())
+    }
+
+    pub fn set_color(&mut self, root: &Path, color: &str) -> Result<(), String> {
+        self.edit_owner(root, |p| p.settings.color = Some(color.to_ascii_lowercase()))
+    }
+
+    pub fn set_collapsed(&mut self, root: &Path, collapsed: bool) {
+        self.collapsed.retain(|c| c != root);
+        if collapsed {
+            self.collapsed.push(root.to_path_buf());
+        }
+        self.save();
+    }
+
     pub fn current_item(&self) -> Option<ProjectItem> {
-        self.current.as_ref().map(|p| ProjectItem { name: p.settings.name.clone(), root: p.root.clone() })
+        self.project().map(|p| ProjectItem { name: p.settings.name.clone(), root: p.root.clone() })
     }
 }
 

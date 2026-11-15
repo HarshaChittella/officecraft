@@ -288,6 +288,8 @@ pub struct Progress {
     pub pending: usize,
     /// Files that couldn't be read, with why.
     pub failed: Vec<(PathBuf, String)>,
+    /// Goes up whenever the index changes (a file read again leaves the counts as they were).
+    pub generation: u64,
 }
 
 /// Keeps an [`Index`] in step with the project's files on a background thread: it reads the
@@ -328,6 +330,7 @@ impl Indexer {
 
 fn run(rx: Receiver<Snapshot>, index: Arc<Mutex<Index>>, progress: Arc<Mutex<Progress>>, wake: impl Fn()) {
     let mut seen: HashMap<PathBuf, (Option<SystemTime>, u64)> = HashMap::new();
+    let mut generation = 0u64;
     let mut failed: HashMap<PathBuf, String> = HashMap::new();
     while let Ok(mut snap) = rx.recv() {
         // Only the newest snapshot matters.
@@ -349,15 +352,16 @@ fn run(rx: Receiver<Snapshot>, index: Arc<Mutex<Index>>, progress: Arc<Mutex<Pro
         }
         let mut todo: Vec<PathBuf> = now.iter().filter(|(p, stamp)| seen.get(*p) != Some(stamp)).map(|(p, _)| p.clone()).collect();
         todo.sort();
-        let publish = |pending: usize, failed: &HashMap<PathBuf, String>, index: &Arc<Mutex<Index>>| {
+        let publish = |pending: usize, failed: &HashMap<PathBuf, String>, index: &Arc<Mutex<Index>>, generation: &mut u64| {
+            *generation += 1;
             let indexed = index.lock().map(|i| i.len()).unwrap_or(0);
             let mut f: Vec<_> = failed.iter().map(|(p, e)| (p.clone(), e.clone())).collect();
             f.sort();
             if let Ok(mut g) = progress.lock() {
-                *g = Progress { indexed, pending, failed: f };
+                *g = Progress { indexed, pending, failed: f, generation: *generation };
             }
         };
-        publish(todo.len(), &failed, &index);
+        publish(todo.len(), &failed, &index, &mut generation);
         if !gone.is_empty() && todo.is_empty() {
             wake();
         }
@@ -380,7 +384,7 @@ fn run(rx: Receiver<Snapshot>, index: Arc<Mutex<Index>>, progress: Arc<Mutex<Pro
             if let Some(stamp) = now.get(p) {
                 seen.insert(p.clone(), *stamp);
             }
-            publish(todo.len() - n - 1, &failed, &index);
+            publish(todo.len() - n - 1, &failed, &index, &mut generation);
             wake();
         }
     }

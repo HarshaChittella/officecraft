@@ -115,6 +115,12 @@ All chrome colours come from these, defined for light and dark. The contrast pai
 - An action can be offered in the toast ("Show in Finder", "Undo close").
 - Errors use `danger` for the icon only, never for the whole toast.
 
+## Tab groups (Phase 6b)
+
+- One per open project, as Chrome groups tabs. The label is a rounded pill in the group's colour with the project name (semibold 12 pt), before its first tab; a 2 pt line of the colour runs under the group's tabs.
+- Clicking the label collapses the group to just the label, with the number of hidden tabs. Right-click: name field, nine colour swatches (Grey, Blue, Red, Yellow, Green, Pink, Purple, Cyan, Orange), Collapse/Expand, Show in Sidebar, Close Project.
+- Label text meets WCAG AA on every colour in both appearances (`tokens::tests`).
+
 ## Sidebar (Phase 6)
 
 - **Header:** the project name with a switcher (⌄), and a search field (⌃⇧F; ⇧⌘F is WordCraft's Font and PdfCraft's Advanced Search) that searches across every file in the project.

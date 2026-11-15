@@ -19,4 +19,4 @@ pub mod tree;
 
 pub use editor::{CloseState, DocId, DocInfo, Editor, EditorError, Opened, Result};
 pub use kind::Kind;
-pub use tabs::{Tab, TabId, Tabs};
+pub use tabs::{Group, GroupId, Tab, TabId, Tabs};

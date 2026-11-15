@@ -78,12 +78,34 @@ impl Palette {
         }
     }
 
+    /// Tab group colour `i` (wrapping), and the colour of a label written on it.
+    pub fn group(&self, i: u8) -> (Color32, Color32) {
+        let (fill, light_text) = GROUP_COLORS[usize::from(i) % GROUP_COLORS.len()];
+        let fill = if self.dark { rgb(fill.1) } else { rgb(fill.0) };
+        let ink = if self.dark || !light_text { rgb(0x1F1F23) } else { rgb(0xFFFFFF) };
+        (fill, ink)
+    }
+
     /// `c` at `alpha` (0–1) over transparent: a soft tint for hover states.
     pub fn tint(c: Color32, alpha: f32) -> Color32 {
         let a = (alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
         Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), a)
     }
 }
+
+/// Tab group colours: name, (light, dark) fill, and whether light mode writes white on it.
+pub const GROUP_NAMES: [&str; 9] = ["Grey", "Blue", "Red", "Yellow", "Green", "Pink", "Purple", "Cyan", "Orange"];
+const GROUP_COLORS: [((u32, u32), bool); 9] = [
+    ((0x5F6368, 0xC4C7CC), true),
+    ((0x1A66D2, 0x8AB4F8), true),
+    ((0xC5221F, 0xF28B82), true),
+    ((0xF2B200, 0xFDD663), false),
+    ((0x137333, 0x81C995), true),
+    ((0xB80672, 0xFF8BCB), true),
+    ((0x8430CE, 0xC58AF9), true),
+    ((0x00707A, 0x78D9EC), true),
+    ((0xF29233, 0xFCAD70), false),
+];
 
 /// Sizes in points (docs/design.md).
 pub mod size {
@@ -228,6 +250,17 @@ mod tests {
     fn contrast(a: Color32, b: Color32) -> f32 {
         let (x, y) = (luminance(a), luminance(b));
         (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn group_labels_are_readable_on_their_colour() {
+        for p in [Palette::LIGHT, Palette::DARK] {
+            for i in 0..GROUP_NAMES.len() as u8 {
+                let (fill, ink) = p.group(i);
+                let c = contrast(ink, fill);
+                assert!(c >= 4.5, "{} label (dark={}): {c:.2}", GROUP_NAMES[usize::from(i)], p.dark);
+            }
+        }
     }
 
     #[test]

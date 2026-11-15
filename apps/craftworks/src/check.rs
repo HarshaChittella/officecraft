@@ -68,6 +68,8 @@ pub struct Check {
     /// When the window may start measuring idleness: new documents finish their first work
     /// (layout, titles) in a few seconds, measured in time, not frames.
     settle_until: Option<f64>,
+    /// When the current wait for something to happen started (seconds, the window's clock).
+    since: Option<f64>,
     wakes: std::collections::BTreeMap<String, u64>,
     resize_worst: f64,
     /// Mean luminance (0–1) of each tab's engine area, from its screenshot.
@@ -96,6 +98,7 @@ impl Check {
             idle_input: 0,
             idle_retries: 0,
             settle_until: None,
+            since: None,
             wakes: Default::default(),
             resize_worst: 0.0,
             luminance: Arc::new(Mutex::new(Vec::new())),
@@ -170,6 +173,18 @@ impl Check {
             flag.store(true, Ordering::SeqCst);
         })));
         self.shot_done = Some(done);
+    }
+
+    /// Whether to keep waiting for something that takes real time (a rescan, a file read):
+    /// true until `secs` have passed since the wait began. Call [`Check::done_waiting`] after.
+    fn still_waiting(&mut self, ctx: &egui::Context, secs: f64) -> bool {
+        let now = ctx.input(|i| i.time);
+        let start = *self.since.get_or_insert(now);
+        now - start < secs
+    }
+
+    fn done_waiting(&mut self) {
+        self.since = None;
     }
 
     /// Whether the window must be left alone (no frames asked for) while idle CPU is measured.
@@ -661,11 +676,11 @@ impl Check {
                     }
                     1 => {
                         let pr = app.projects.progress.clone();
-                        let docs = app.projects.snapshot.documents().count();
-                        if (pr.pending > 0 || pr.indexed < 4) && self.tries < 900 {
-                            self.tries += 1;
+                        let docs = app.projects.current_open().map_or(0, |o| o.snapshot.documents().count());
+                        if (pr.pending > 0 || pr.indexed < 4) && self.still_waiting(ctx, 30.0) {
                             return;
                         }
+                        self.done_waiting();
                         self.line(format!("INFO index: {} files, {} failed {:?}", pr.indexed, pr.failed.len(), pr.failed));
                         self.check(
                             docs >= 4 && pr.indexed >= 4,
@@ -691,10 +706,10 @@ impl Check {
                     3 => {
                         app.projects.query = "launch".into();
                         app.projects.frame();
-                        if app.projects.hits.is_empty() && self.tries < 900 {
-                            self.tries += 1;
+                        if app.projects.hits.is_empty() && self.still_waiting(ctx, 20.0) {
                             return;
                         }
+                        self.done_waiting();
                         self.check(!app.projects.hits.is_empty(), "a saved change is found by search (the folder is watched and re-read)");
                         self.tries = 0;
                     }
@@ -717,11 +732,12 @@ impl Check {
                                 }
                             }
                         }
+                        self.tries += 1;
                         let at = app.active_path().is_some_and(|p| p.ends_with(file));
-                        if (!at || app.projects.goto.is_some()) && self.tries < 900 {
-                            self.tries += 1;
+                        if (!at || app.projects.goto.is_some()) && self.still_waiting(ctx, 20.0) {
                             return;
                         }
+                        self.done_waiting();
                         self.check(at, format!("searching “{q}” finds {file}, and the hit opens it in a tab"));
                         if phase == 4 {
                             self.screenshot(ctx, "project-search");
@@ -741,11 +757,106 @@ impl Check {
                     9 => {
                         self.screenshot(ctx, "project-files");
                         // Back to how the later stages expect the window: the new file's tab closed.
-                        let new_tab = app.tabs.active().filter(|t| t.kind == Kind::Presentation).map(|t| t.id);
+                        let new_tab = app.tab_for_path(&dir.join("Untitled Presentation.pptx"));
                         if let Some(id) = new_tab {
                             app.close_tab(id);
                         }
                         self.wait = 10;
+                    }
+                    // Tab groups: the project's tabs sit together behind its label.
+                    10 => {
+                        let key = dir.to_string_lossy().into_owned();
+                        let g = app.tabs.group_by_key(&key);
+                        let ids: Vec<TabId> = app.tabs.iter().map(|t| t.id).collect();
+                        let members = g.map(|g| app.tabs.in_group(g)).unwrap_or_default();
+                        // The new presentation's tab closes through DeckCraft, which takes a moment.
+                        if members.len() > 4 && self.still_waiting(ctx, 10.0) {
+                            return;
+                        }
+                        self.done_waiting();
+                        let together = members.windows(2).all(|w| {
+                            let pos = |id: TabId| ids.iter().position(|x| *x == id).unwrap_or(0);
+                            pos(w[1]) == pos(w[0]) + 1
+                        });
+                        self.check(
+                            g.is_some() && members.len() == 4 && together,
+                            format!("the project's four files sit together in its tab group ({} tabs in it)", members.len()),
+                        );
+                        let second = dir.join("Second project");
+                        let _ = std::fs::create_dir_all(&second);
+                        app.open_project(&second, Some("Second"), ctx);
+                        app.new_file_in(&second, Kind::Document);
+                        self.wait = 10;
+                    }
+                    11 => {
+                        // Let the tabs finish sliding into place (time, not frames).
+                        if self.still_waiting(ctx, 0.8) {
+                            return;
+                        }
+                        self.done_waiting();
+                        let second = dir.join("Second project");
+                        let g2 = app.tabs.group_by_key(&second.to_string_lossy());
+                        let in_second = g2.map(|g| app.tabs.in_group(g).len()).unwrap_or(0);
+                        let shown = app.projects.project().map(|p| p.settings.name.clone());
+                        self.check(
+                            app.tabs.groups().count() == 2 && in_second == 1 && shown.as_deref() == Some("Second"),
+                            format!("a second project opens as a second group, with its new file in it; the sidebar shows it ({shown:?})"),
+                        );
+                        self.screenshot(ctx, "tab-groups");
+                        self.wait = 30;
+                    }
+                    12 => {
+                        if let Some(g) = app.tabs.group_by_key(&dir.to_string_lossy()) {
+                            app.toggle_group(g.0);
+                        }
+                        self.wait = 30;
+                    }
+                    13 => {
+                        if self.still_waiting(ctx, 0.8) {
+                            return;
+                        }
+                        self.done_waiting();
+                        let g = app.tabs.group_by_key(&dir.to_string_lossy());
+                        let hidden = g.map(|g| app.tabs.in_group(g)).unwrap_or_default().iter().all(|t| !app.tabs.is_visible(*t));
+                        let front_outside = app.tabs.active().is_some_and(|t| t.group != g);
+                        self.check(
+                            hidden && front_outside,
+                            "clicking a group's label collapses it: its tabs hide, and the front tab moves out of it",
+                        );
+                        self.screenshot(ctx, "tab-groups-collapsed");
+                        self.wait = 30;
+                    }
+                    14 => {
+                        if let Some(g) = app.tabs.group_by_key(&dir.to_string_lossy()) {
+                            app.toggle_group(g.0);
+                        }
+                        let root = dir.join("Second project");
+                        if let Some(g) = app.tabs.group_by_key(&root.to_string_lossy()) {
+                            app.on_tab_action(ctx, craftworks_shell::TabAction::RenameGroup { id: g.0, name: "Renamed".into() });
+                            app.on_tab_action(ctx, craftworks_shell::TabAction::SetGroupColor { id: g.0, color: 4 });
+                        }
+                        self.wait = 6;
+                    }
+                    15 => {
+                        let root = dir.join("Second project");
+                        let saved = craftworks_core::project::Project::open(&root).map(|p| (p.settings.name, p.settings.color)).ok();
+                        let label = app.tabs.group_by_key(&root.to_string_lossy()).and_then(|g| app.tabs.group(g)).map(|g| (g.name.clone(), g.color));
+                        self.check(
+                            saved == Some(("Renamed".into(), Some("green".into()))) && label == Some(("Renamed".into(), 4)),
+                            format!("renaming and recolouring a group saves them in its project ({saved:?}, label {label:?})"),
+                        );
+                        app.close_project(&root);
+                        self.wait = 20;
+                    }
+                    16 => {
+                        let root = dir.join("Second project");
+                        let gone =
+                            app.tabs.group_by_key(&root.to_string_lossy()).is_none() && !app.projects.open.iter().any(|o| o.project.root == root);
+                        self.check(gone && app.tabs.groups().count() == 1, "Close Project closes its tabs, then its group");
+                        let first = app.tabs.iter().find(|t| t.kind == Kind::Document).map(|t| t.id);
+                        if let Some(t) = first {
+                            app.tabs.activate(t);
+                        }
                     }
                     _ => {
                         self.stage = Stage::DirtyClose { phase: 0 };

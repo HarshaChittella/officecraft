@@ -317,3 +317,56 @@ fn the_index_reads_every_kind() {
     assert_eq!(find("notes.pdf", "Osprey"), Location::Page(0));
     assert!(read_text(&dir.join("missing.docx")).is_err());
 }
+
+/// A file saved again is read again, and its new words are found (the counts alone don't move).
+#[test]
+fn the_indexer_rereads_a_changed_file() {
+    use craftworks_core::index::Indexer;
+    use craftworks_core::tree::{Limits, scan};
+    let dir = scratch("reread");
+    let pdf = |text: &str| pdfcraft_engine::Session::new().create_from_text("Notes", text).unwrap();
+    std::fs::write(dir.join("notes.pdf"), pdf("Osprey").as_slice()).unwrap();
+    let ix = Indexer::start(|| {});
+    let wait_for = |word: &str| {
+        for _ in 0..500 {
+            if !ix.search(word, 5).is_empty() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        false
+    };
+    ix.update(scan(&dir, Limits::default()));
+    assert!(wait_for("osprey"));
+    let before = ix.progress().generation;
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(dir.join("notes.pdf"), pdf("Kestrel").as_slice()).unwrap();
+    ix.update(scan(&dir, Limits::default()));
+    assert!(wait_for("kestrel"));
+    assert!(ix.search("osprey", 5).is_empty(), "the old text is gone");
+    assert!(ix.progress().generation > before, "the generation moves even though the counts don't");
+}
+
+/// Closing a presentation that isn't DeckCraft's front one closes that one.
+#[test]
+fn closing_a_background_presentation_closes_it() {
+    let dir = scratch("deck-bg-close");
+    let ctx = egui::Context::default();
+    let mut ed = new_editor(Kind::Presentation);
+    frames(&ctx, ed.as_mut(), 2);
+    let a = ed.new_document().unwrap();
+    frames(&ctx, ed.as_mut(), 2);
+    ed.run_command("insert.textBox", json!({"text": "One"})).unwrap();
+    ed.save_as(a, &dir.join("a.pptx")).unwrap();
+    let b = ed.new_document().unwrap();
+    frames(&ctx, ed.as_mut(), 2);
+    ed.save_as(b, &dir.join("b.pptx")).unwrap();
+    frames(&ctx, ed.as_mut(), 2);
+    ed.run_command("slide.go", json!({"index": 0})).unwrap();
+    frames(&ctx, ed.as_mut(), 2);
+    let state: Vec<_> = ed.documents().iter().map(|d| (d.id, d.dirty)).collect();
+    assert!(state.iter().all(|(_, dirty)| !dirty), "both saved: {state:?}");
+    ed.request_close(a).unwrap();
+    frames(&ctx, ed.as_mut(), 3);
+    assert_eq!(ed.close_state(a), CloseState::Closed, "documents left: {:?}", ed.documents().iter().map(|d| d.path.clone()).collect::<Vec<_>>());
+}

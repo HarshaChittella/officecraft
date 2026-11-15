@@ -246,6 +246,48 @@ Done when: you can create a project, add one of each type, open them from the si
   Screenshots are `project-search-*.png` and `project-files-*.png`. Idle CPU in the background stays at 0.3% with the watcher on. 91 tests pass, plus 1 ignored (D31).
 - **Left to you:** create a project with New Project…, drag a file of each type into its folder in Finder, then search and right-click in the sidebar.
 
+## Phase 6b: Projects as tab groups (owner's request, 2026-11-16)
+
+Each open project is a tab group, as in Chrome, and the sidebar stays (D41).
+
+**Result (2026-11-16): done.**
+- **Model** (`craftworks-core::tabs`): groups with a key (the project folder), name, colour and collapsed flag.
+  - A group's tabs always sit together.
+  - A tab opened from inside a group goes after the group.
+  - A dragged tab stays inside its own group, and an ungrouped tab can't be dropped into the middle of one.
+  - Collapsing the front tab's group moves to the nearest tab outside it; ⌃Tab skips hidden tabs; showing a tab expands its group.
+- **Strip** (`craftworks-shell::tabs`):
+  - a coloured label before each group's tabs and a line of its colour under them;
+  - a click on the label collapses or expands the group, and a collapsed label shows how many tabs it hides;
+  - the label's menu has Rename, nine colours, Collapse/Expand, Show in Sidebar and Close Project.
+  
+  The layout now uses measured slots instead of equal widths. All nine colours pass WCAG AA for the label text in both modes.
+- **Projects** (`apps/craftworks/src/projects.rs`):
+  - several projects can be open at once, each with its own watcher and index;
+  - a tab joins the group of the project that holds its file (the innermost, if folders nest);
+  - the sidebar follows the front tab's project and stays on one picked in it;
+  - name and colour are saved in `project.json` (`color`), and the open projects and collapsed groups in `projects.json`;
+  - Close Project closes each tab through its app's own close, then the project, and a cancelled close keeps it open.
+- **Bugs found and fixed:**
+  - Opening a file that's already open made DeckCraft open a second copy. A tab that already shows the file now comes to the front.
+  - Search results didn't refresh when a file was read again with the counts unchanged. The index now has a generation number.
+  - `--check` waits for real-time events (rescans, file reads, animations) in seconds, not frames.
+- `--check`: 59 checks, ALL PASS in light and dark. The new checks:
+  - the project's tabs sit together;
+  - a second project becomes a second group;
+  - collapse hides a group's tabs;
+  - rename and colour are saved;
+  - Close Project removes the group.
+  
+  Screenshots are `tab-groups-*.png` and `tab-groups-collapsed-*.png`. 97 tests pass, plus 1 ignored (D31).
+
+## Phase 6c: Menus that follow the front tab (owner's request, 2026-11-16)
+
+Each app's own menus and shortcuts in the macOS menu bar, swapped when another kind of tab comes to the front (D42). Craftworks keeps only its app menu, File's tab items and Window.
+- PdfCraft: its own `menus.rs` (in its library).
+- WordCraft, DeckCraft, GridCraft: built from each app's command catalogue (title, ribbon location, shortcut), so they match the ribbons. GridCraft's hand-made menu lives in its binary, which we can't link.
+- Done when: the menu bar shows each app's menus with its shortcuts, a test checks that every menu shortcut is one that app binds, and `--check` runs an item from each app's menus.
+
 ## Phase 7: One AI connector
 
 Tasks
