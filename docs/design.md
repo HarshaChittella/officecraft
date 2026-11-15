@@ -29,7 +29,7 @@ Status: proposed 2026-11-14, for Phase 2. Covers only **our** chrome: the tab st
   - Tabs follow, then "+".
   - At the right: a sidebar toggle (Phase 6) and an AI status pill (Phase 7).
   - The row's background is the window surface (below). It blends into the app's own title row underneath, separated only by a hairline.
-- **Sidebar (Phase 6):** 248 pt by default, 200–400 pt resizable, collapsed with ⌘\. It slides in from the left under the title row and pushes the tab content over; it never covers it.
+- **Sidebar (Phase 6):** 248 pt by default, 200–400 pt resizable, collapsed with ⌃⌘S (D40). It slides in from the left under the title row and pushes the tab content over; it never covers it.
 
 ## Tokens
 

@@ -312,9 +312,9 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 - It only wakes the window when something changed.
 - The index (`craftworks-core::index`) reads files with each app's own headless reader. That needs one new path dependency, `pdfcraft-render`, which is from the PdfCraft repo, so nothing outside the four repos is added. A reader that fails on a damaged file is caught, and the file is listed as "couldn't be read".
 
-## D40 Sidebar shortcuts: ⌘\ and ⌃⇧F. PROPOSED 2026-11-16 (⌘\ to confirm)
+## D40 Sidebar shortcuts: ⌃⌘S and ⌃⇧F. SETTLED 2026-11-16 (owner's decision)
 
-- ⌘\ shows or hides the sidebar, as the brief asks. It's also PdfCraft's Split View, so the window takes it on purpose (listed in `keys::INTENDED`); Split View stays in PdfCraft's View menu.
+- The brief's ⌘\ is PdfCraft's Split View, and the owner chose not to take it. The sidebar uses ⌃⌘S, macOS's standard Show Sidebar key (Finder, Mail, Notes), which no Craft app binds.
 - Search uses ⌃⇧F, which no app binds. The design's ⇧⌘F is WordCraft's Font dialog and PdfCraft's Advanced Search, and ⌥⌘F is WordCraft's Insert Footnote.
 
 ## Upstream test results (task 0.6)

@@ -43,15 +43,14 @@ pub const SHORTCUTS: [Shortcut; 8] = [
     sc(Action::ReopenClosedTab, Key::T, true, false, true, false, "Reopen closed tab"),
     sc(Action::NextTab, Key::Tab, false, true, false, false, "Next tab"),
     sc(Action::PreviousTab, Key::Tab, false, true, false, true, "Previous tab"),
-    sc(Action::ToggleSidebar, Key::Backslash, true, false, false, false, "Show or hide the sidebar"),
+    sc(Action::ToggleSidebar, Key::S, true, true, false, false, "Show or hide the sidebar"),
     sc(Action::SearchProject, Key::F, false, true, false, true, "Search the project"),
 ];
 
 /// App bindings the window takes over on purpose, by chord and command-id fragment (D26):
-/// ⌘T (the owner's choice: those commands stay on their ribbons), keys that already mean
-/// the same thing in the app (close, open, next or previous document tab), and ⌘\ for the
-/// sidebar (the brief's key; PdfCraft's Split View keeps its menu item, D40).
-pub const INTENDED: [(&str, &str); 6] = [("⌘T", ""), ("⌘W", "close"), ("⌘O", "open"), ("⌃TAB", "tab"), ("⌃⇧TAB", "tab"), ("⌘\\", "view.split")];
+/// ⌘T (the owner's choice: those commands stay on their ribbons), and keys that already mean
+/// the same thing in the app (close, open, next or previous document tab).
+pub const INTENDED: [(&str, &str); 5] = [("⌘T", ""), ("⌘W", "close"), ("⌘O", "open"), ("⌃TAB", "tab"), ("⌃⇧TAB", "tab")];
 
 impl Shortcut {
     pub fn chord(&self) -> Chord {
@@ -118,6 +117,8 @@ mod tests {
         assert_eq!(route(&key(Key::T, Modifiers { alt: true, ..cmd }), false), Route::Shortcut(Some(Action::ReopenClosedTab)));
         assert_eq!(route(&key(Key::Tab, Modifiers::CTRL), true), Route::Shortcut(Some(Action::NextTab)), "even while the chrome has focus");
         assert_eq!(route(&key(Key::B, cmd), false), Route::Document);
+        assert_eq!(route(&key(Key::S, Modifiers { ctrl: true, ..cmd }), false), Route::Shortcut(Some(Action::ToggleSidebar)));
+        assert_eq!(route(&key(Key::S, cmd), false), Route::Document, "⌘S is still the document's Save");
         assert_eq!(route(&key(Key::Tab, Modifiers::NONE), false), Route::Document, "plain Tab is the document's");
         assert_eq!(route(&Event::Text("a".into()), false), Route::Document);
         assert_eq!(route(&Event::Text("a".into()), true), Route::Chrome);

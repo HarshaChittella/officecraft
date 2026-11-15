@@ -214,7 +214,7 @@ Done when: copy and paste between tabs keeps formatting in both test cases, and 
 Tasks
 - 6.1 `craftworks-core::project`: a folder plus `.craftworks/project.json` (`name`, `pinned`, `ai.instructions`, `ai.permission` = `read` | `edit` | `edit_save`), with a versioned schema and tests.
 - 6.2 Sidebar (`craftworks-shell`, see design.md "Sidebar"):
-  - collapsible with ⌘\\, resizable
+  - collapsible with ⌃⌘S (D40; the brief's ⌘\\ is PdfCraft's Split View), resizable
   - project switcher, Pinned and Files sections, and a file tree filtered to supported types with type icons
   - new file in the project, rename, Reveal in Finder
   - a file watcher that refreshes the tree (`notify`, if it's already in the Craft graph; otherwise ask first).
@@ -226,7 +226,7 @@ Done when: you can create a project, add one of each type, open them from the si
 **Result (2026-11-16): done; a look by hand is left to you (below).**
 - **Projects** (`craftworks-core::project`, D38): `.craftworks/project.json` with `version`, `name`, `pinned`, `ai.instructions` and `ai.permission` (`read`, the default and what anything unknown means; `edit`; `edit_save`). Pins can't point outside the folder. A file from a newer Craftworks is shown but never overwritten. The known projects and the open one are kept in `projects.json` in the settings folder.
 - **Sidebar** (`craftworks-shell::sidebar`):
-  - ⌘\ shows or hides it (D40); it's resizable from 200 to 400 pt.
+  - ⌃⌘S shows or hides it (D40, the macOS Show Sidebar key); it's resizable from 200 to 400 pt.
   - The switcher has the known projects, New Project…, Open Folder as Project… and "Show all files".
   - Below the switcher: a search field, then Pinned and Files. The tree shows supported documents with kind icons, and long names end in "…".
   - The right-click menu has New Document/Sheet/Presentation Here, Rename… (refused while the file is open in a tab), Reveal in Finder, and Pin.
@@ -234,7 +234,7 @@ Done when: you can create a project, add one of each type, open them from the si
 - **Index** (`craftworks-core::index`): each file is read with its own app's reader (WordCraft's `open_path`, GridCraft's `open_bytes`, DeckCraft's `read_presentation_file` including tables and notes, and PdfCraft's text layer), into an in-memory token index on a background thread. Every word must match and the last also matches as a prefix. Hits are paragraphs, cells, slides or pages.
 - **Opening a hit** goes to it. The document runs Find for the word; the sheet selects the cell; the presentation goes to the slide; the PDF goes to the page (a Craftworks command, `craftworks.goToPage`, on PdfCraft's own `go_to_page`).
 - **Search shortcut:** ⌃⇧F. The design's ⇧⌘F is WordCraft's Font and PdfCraft's Advanced Search, and ⌥⌘F is WordCraft's footnote.
-- The collision test now treats `\` and `Backslash` as one key. It had been missing punctuation clashes, and that's how ⌘\ vs PdfCraft's Split View came to light.
+- The collision test now treats `\` and `Backslash` as one key. It had been missing punctuation clashes: ⌘\, the brief's sidebar key, is PdfCraft's Split View, so the sidebar uses ⌃⌘S (owner's choice, D40).
 - `--check`: 54 checks, ALL PASS in light and dark. The new ones:
   - the folder becomes a project;
   - 4 files are listed and read;
@@ -244,7 +244,7 @@ Done when: you can create a project, add one of each type, open them from the si
   - a pin is saved.
   
   Screenshots are `project-search-*.png` and `project-files-*.png`. Idle CPU in the background stays at 0.3% with the watcher on. 91 tests pass, plus 1 ignored (D31).
-- **Left to you:** create a project with New Project…, drag a file of each type into its folder in Finder, then search and right-click in the sidebar. Also confirm ⌘\ (D40).
+- **Left to you:** create a project with New Project…, drag a file of each type into its folder in Finder, then search and right-click in the sidebar.
 
 ## Phase 7: One AI connector
 
