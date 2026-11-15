@@ -90,6 +90,8 @@ pub struct App {
     /// The project sidebar, and the projects behind it.
     pub sidebar: Sidebar,
     pub projects: projects::Projects,
+    /// Each app's commands for its menus, read once (craftworks_core::catalog).
+    catalogs: HashMap<Kind, Vec<craftworks_core::catalog::MenuEntry>>,
     /// Projects being closed from their group's menu, waiting for their tabs to close.
     closing_projects: Vec<PathBuf>,
     /// The front tab (and its group) when groups were last synced.
@@ -149,6 +151,7 @@ impl App {
             recent: settings::load_recent(),
             sidebar: Sidebar::default(),
             projects: projects::Projects::default(),
+            catalogs: HashMap::new(),
             closing_projects: Vec::new(),
             last_front: None,
             closed: Vec::new(),
@@ -537,6 +540,17 @@ impl App {
             // eframe answers with a Paste event of the clipboard's text next frame, which the
             // input hook routes to the document.
             MenuCommand::Paste => ctx.send_viewport_cmd(egui::ViewportCommand::RequestPaste),
+            MenuCommand::AppMenu(key) => {
+                if let Some(kind) = self.tabs.active().map(|t| t.kind) {
+                    let host = self.engine(kind);
+                    let ectx = host.context().clone();
+                    if !host.editor_mut().run_native_menu(&ectx, &key) {
+                        log::warn!("{kind:?} has no menu item {key}");
+                    }
+                }
+            }
+            MenuCommand::ToggleSidebar => self.sidebar.toggle(),
+            MenuCommand::SearchProject => self.sidebar.focus_search(),
             MenuCommand::Run(id) => {
                 if let Some(kind) = self.tabs.active().map(|t| t.kind)
                     && let Err(e) = self.engine(kind).editor_mut().run_command(&id, serde_json::json!({}))
@@ -565,7 +579,12 @@ impl App {
         let _ = ctx;
     }
 
-    fn menu_bar(&self) -> craft_menu::MenuBar {
+    pub fn menu_bar(&mut self) -> craft_menu::MenuBar {
+        let shown = self.tabs.active().map(|t| t.kind);
+        if let Some(k) = shown.filter(|k| *k != Kind::Pdf) {
+            self.catalogs.entry(k).or_insert_with(|| craftworks_core::catalog::entries(k));
+        }
+        let native = shown.filter(|k| *k == Kind::Pdf).and_then(|k| self.engine_ref(k)).and_then(|h| h.editor().native_menus(h.context()));
         let items = self.tab_items();
         let active = self.tabs.active().map(|t| t.id.0);
         let state = menu::MenuState {
@@ -574,7 +593,12 @@ impl App {
             recent: self.recent.files().iter().map(|f| f.path.as_path()).collect(),
             can_reopen: !self.closed.is_empty(),
         };
-        menu::bar(&state)
+        let app = match (shown, native) {
+            (Some(_), Some(bar)) => menu::AppMenus::Native(bar),
+            (Some(k), None) => self.catalogs.get(&k).map_or(menu::AppMenus::None, |e| menu::AppMenus::Catalog(e)),
+            (None, _) => menu::AppMenus::None,
+        };
+        menu::bar(&state, app)
     }
 
     /// Keeps the menu bar in step (the shown kind, the tabs, recent files), and runs its clicks.

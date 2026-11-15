@@ -135,6 +135,17 @@ pub trait Editor {
         }
     }
 
+    /// The app's own Mac menu bar, as it is now, if it has one (PdfCraft). `ctx` is the
+    /// engine's context. The others' menus are built from [`crate::catalog`].
+    fn native_menus(&self, _ctx: &egui::Context) -> Option<craft_menu::MenuBar> {
+        None
+    }
+
+    /// Runs an item of [`Editor::native_menus`], by its command key. False when unknown.
+    fn run_native_menu(&mut self, _ctx: &egui::Context, _key: &str) -> bool {
+        false
+    }
+
     /// Draws the app light or dark, as the window is (one appearance across tabs, design.md).
     fn set_dark(&mut self, dark: bool);
 

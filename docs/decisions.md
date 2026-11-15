@@ -323,9 +323,11 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 - A tab's group comes from its file: the open project whose folder holds it. Dragging can't move a tab out of its group, because its file decides the group. Untitled documents join a group once saved inside a project.
 - The sidebar shows one project: the front tab's, or the one picked in it.
 
-## D42 The menu bar follows the front tab. PROPOSED 2026-11-16
+## D42 The menu bar follows the front tab. SETTLED 2026-11-16 (owner's request)
 
-- See PLAN.md Phase 6c. No upstream change: menus come from each app's command catalogue (PdfCraft's from its library).
+- WordCraft, GridCraft and DeckCraft have no Mac menu bar we can link (GridCraft's is in its binary), so theirs are built from each app's own command catalogue. Ribbon tabs are mapped onto the usual Mac menus. Labels, shortcuts and order come from the app, so the menus stay in step with its ribbon. PdfCraft's own menu bar is used as it is.
+- A clicked item with a shortcut sends that keystroke (the app's own handling, dialogs included). One without a shortcut runs the command; one that needs arguments and has no shortcut is left out.
+- `craftworks-core` now depends on `craft-menu` and `craft-keymap`, from craft-libs at the pinned revision; they're not new to the graph.
 
 ## Upstream test results (task 0.6)
 

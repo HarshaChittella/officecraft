@@ -1688,6 +1688,8 @@ dependencies = [
 name = "craftworks-core"
 version = "0.1.0"
 dependencies = [
+ "craft-keymap",
+ "craft-menu",
  "deckcraft-engine",
  "deckcraft-ui-egui",
  "egui",

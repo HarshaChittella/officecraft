@@ -288,6 +288,26 @@ Each app's own menus and shortcuts in the macOS menu bar, swapped when another k
 - WordCraft, DeckCraft, GridCraft: built from each app's command catalogue (title, ribbon location, shortcut), so they match the ribbons. GridCraft's hand-made menu lives in its binary, which we can't link.
 - Done when: the menu bar shows each app's menus with its shortcuts, a test checks that every menu shortcut is one that app binds, and `--check` runs an item from each app's menus.
 
+**Result (2026-11-16): done.**
+- `craftworks-core::catalog`: each app's commands with label, ribbon place, shortcut and whether they need arguments (a menu click can't give any, so those are left out unless they have a shortcut).
+- **Ribbon tabs map onto Mac menus:** File, Edit, View, Insert, Format, Table, Data, Formulas, Arrange, Slide Show, Tools.
+  - Home's Clipboard and Editing groups go in Edit.
+  - Contextual tabs (Picture Format, Chart Design…) are submenus.
+  - A long menu shows each ribbon group as a submenu (Format ▸ Font, Paragraph, Styles).
+  - Caret keys (the Editing and Navigation tabs) stay out.
+  
+  WordCraft gets 471 items, GridCraft 219, DeckCraft 174.
+- **PdfCraft:** its own menu bar (`Editor::native_menus`), with clicks run by its own `run_menu_command`. Its Edit menu replaces ours, since it handles its own clipboard.
+- **What the window keeps:**
+  - the app menu (Quit);
+  - File's tab items (New Tab, New…, Open, Open Recent, Close Tab, Reopen);
+  - Edit's Undo, Redo, Cut, Copy, Paste, Select All and Find;
+  - View's tab items, plus Show or Hide Sidebar (⌃⌘S) and Search Project (⌃⇧F);
+  - Window.
+  
+  An app item with a window shortcut (⌘T, ⌘W…) shows no shortcut.
+- **Tests:** every keystroke an app's menu item sends is one that app binds, and no app item shows a window shortcut. `--check` brings each kind to the front and checks its menus, and runs PdfCraft's View ▸ Zoom In from the bar. 64 checks pass in light and dark.
+
 ## Phase 7: One AI connector
 
 Tasks

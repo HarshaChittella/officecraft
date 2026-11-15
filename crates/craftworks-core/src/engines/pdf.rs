@@ -130,6 +130,16 @@ impl Editor for PdfEditor {
         Ok(json!({}))
     }
 
+    fn native_menus(&self, ctx: &egui::Context) -> Option<craft_menu::MenuBar> {
+        Some(self.app.menu_bar(ctx))
+    }
+
+    fn run_native_menu(&mut self, ctx: &egui::Context, key: &str) -> bool {
+        let Some(command) = craft_keymap::CommandRef::parse_key(key) else { return false };
+        self.app.run_menu_command(ctx, &command);
+        true
+    }
+
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.app.raw_input_hook(ctx, raw);
     }

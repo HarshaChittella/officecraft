@@ -967,8 +967,62 @@ impl Check {
                         let n = saved["tabs"].as_array().map_or(0, Vec::len);
                         self.line(format!("SESSION {saved}"));
                         self.check(n >= 4, format!("session.json keeps the open tabs' files ({n})"));
-                        self.stage = Stage::Memory { phase: 0 };
-                        return;
+                    }
+                    // The menu bar follows the front tab (D42): each app's own menus.
+                    6..=9 => {
+                        const EXPECT: [(Kind, &[&str]); 4] = [
+                            (Kind::Document, &["Insert", "Format", "Table", "Tools"]),
+                            (Kind::Sheet, &["Insert", "Format", "Data", "Formulas"]),
+                            (Kind::Presentation, &["Insert", "Format", "Arrange", "Slide Show"]),
+                            (Kind::Pdf, &[]),
+                        ];
+                        let (kind, want) = EXPECT[usize::from(phase - 6)];
+                        if self.tries == 0 {
+                            if let Some((tab, _)) = Self::tab_of(app, kind) {
+                                app.tabs.activate(tab);
+                            }
+                            self.tries = 1;
+                            self.wait = 6;
+                            return;
+                        }
+                        self.tries = 0;
+                        let bar = app.menu_bar();
+                        let titles: Vec<String> = bar.menus.iter().map(|m| m.title.clone()).collect();
+                        let mut ids = Vec::new();
+                        fn walk(nodes: &[craft_menu::Node], out: &mut Vec<String>) {
+                            for n in nodes {
+                                match n {
+                                    craft_menu::Node::Item(i) => out.push(i.command.id.clone()),
+                                    craft_menu::Node::Submenu { children, .. } => walk(children, out),
+                                    _ => {}
+                                }
+                            }
+                        }
+                        for m in &bar.menus {
+                            walk(&m.children, &mut ids);
+                        }
+                        if kind == Kind::Pdf {
+                            let own = ids.iter().filter(|i| i.starts_with("cw.app:")).count();
+                            self.check(
+                                own > 20 && !titles.iter().any(|t| t == "Slide Show"),
+                                format!("a PDF tab shows PdfCraft's own menus ({own} of its items; menus {titles:?})"),
+                            );
+                            let zoom = ids.iter().find(|i| i.contains("view.zoom.in")).cloned();
+                            if let Some(z) = &zoom {
+                                app.on_menu(ctx, z);
+                            }
+                            self.check(zoom.is_some(), "PdfCraft's View ▸ Zoom In runs from the menu bar");
+                        } else {
+                            let missing: Vec<&&str> = want.iter().filter(|w| !titles.iter().any(|t| t == **w)).collect();
+                            self.check(
+                                missing.is_empty() && ids.len() > 80,
+                                format!("a {} tab shows {}'s menus ({} items; menus {titles:?})", kind.label(), app_name(kind), ids.len()),
+                            );
+                        }
+                        if phase == 9 {
+                            self.stage = Stage::Memory { phase: 0 };
+                            return;
+                        }
                     }
                     _ => {}
                 }
@@ -1121,4 +1175,14 @@ fn cpu_seconds() -> Option<f64> {
         secs = secs * 60.0 + part.replace('-', "").parse::<f64>().ok()?;
     }
     Some(secs)
+}
+
+/// The Craft app behind a kind of tab.
+fn app_name(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Document => "WordCraft",
+        Kind::Sheet => "GridCraft",
+        Kind::Presentation => "DeckCraft",
+        Kind::Pdf => "PdfCraft",
+    }
 }
