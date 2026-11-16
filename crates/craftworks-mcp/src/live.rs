@@ -21,6 +21,23 @@ use std::time::Duration;
 
 const SOCKET: &str = "live.sock";
 const TOKEN: &str = "live.token";
+/// Where the socket is, when it couldn't go in the settings folder.
+const ADDR: &str = "live.addr";
+/// Unix socket paths are short on macOS (104 bytes with the terminator).
+const MAX_SOCKET_PATH: usize = 100;
+
+/// The socket's path for settings folder `dir`: in it when short enough, else in the temporary
+/// folder under a name made from `dir` (and recorded in `dir`, see [`ADDR`]).
+fn socket_path(dir: &Path) -> PathBuf {
+    let inside = dir.join(SOCKET);
+    if inside.as_os_str().len() <= MAX_SOCKET_PATH {
+        return inside;
+    }
+    // FNV-1a of the folder: the same folder always gets the same short name.
+    let h = dir.as_os_str().as_encoded_bytes().iter().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(*b)).wrapping_mul(0x100_0000_01b3));
+    let tmp = std::env::temp_dir().join(format!("craftworks-{h:016x}.sock"));
+    if tmp.as_os_str().len() <= MAX_SOCKET_PATH { tmp } else { PathBuf::from(format!("/tmp/craftworks-{h:016x}.sock")) }
+}
 /// The longest request or reply line accepted.
 const MAX_LINE: u64 = 64 * 1024 * 1024;
 /// How long a request waits for the window.
@@ -76,6 +93,7 @@ pub struct LiveServer {
     rx: Receiver<Request>,
     socket: PathBuf,
     token_file: PathBuf,
+    addr_file: PathBuf,
 }
 
 fn random_token() -> std::io::Result<String> {
@@ -93,9 +111,14 @@ impl LiveServer {
     /// Starts listening in `dir`. `wake` is called when a request arrives.
     pub fn start(dir: &Path, wake: impl Fn() + Send + Sync + 'static) -> std::io::Result<LiveServer> {
         std::fs::create_dir_all(dir)?;
-        let socket = dir.join(SOCKET);
+        let socket = socket_path(dir);
         let token_file = dir.join(TOKEN);
         let _ = std::fs::remove_file(&socket);
+        let _ = std::fs::remove_file(dir.join(ADDR));
+        if socket != dir.join(SOCKET) {
+            let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(dir.join(ADDR))?;
+            f.write_all(socket.as_os_str().as_encoded_bytes())?;
+        }
         let token = random_token()?;
         {
             let _ = std::fs::remove_file(&token_file);
@@ -112,7 +135,7 @@ impl LiveServer {
                 let _ = std::thread::Builder::new().name("craftworks-live-conn".into()).spawn(move || serve(conn, &token, &tx, &*wake));
             }
         })?;
-        Ok(LiveServer { rx, socket, token_file })
+        Ok(LiveServer { rx, socket, token_file, addr_file: dir.join(ADDR) })
     }
 
     /// The requests waiting for the main thread.
@@ -125,6 +148,7 @@ impl Drop for LiveServer {
     fn drop(&mut self) {
         let _ = std::fs::remove_file(&self.socket);
         let _ = std::fs::remove_file(&self.token_file);
+        let _ = std::fs::remove_file(&self.addr_file);
     }
 }
 
@@ -178,7 +202,8 @@ impl LiveClient {
     /// Connects to the window whose settings folder is `dir`. `None` when it isn't running.
     pub fn connect(dir: &Path) -> Option<LiveClient> {
         let token = std::fs::read_to_string(dir.join(TOKEN)).ok()?.trim().to_string();
-        let stream = UnixStream::connect(dir.join(SOCKET)).ok()?;
+        let socket = std::fs::read_to_string(dir.join(ADDR)).map(|s| PathBuf::from(s.trim())).unwrap_or_else(|_| dir.join(SOCKET));
+        let stream = UnixStream::connect(socket).ok()?;
         stream.set_read_timeout(Some(TIMEOUT + Duration::from_secs(5))).ok()?;
         let writer = stream.try_clone().ok()?;
         Some(LiveClient { reader: BufReader::new(stream), writer, token, next: 0 })
@@ -269,6 +294,27 @@ mod tests {
         assert!(!is_read_only("ui.click", &json!({})));
         assert!(is_read_only("tools/call", &json!({"name": "doc_info"})));
         assert!(!is_read_only("tools/call", &json!({"name": "page_rotate"})));
+    }
+
+    /// A settings folder too deep for a socket path still gets its window reached.
+    #[test]
+    fn a_deep_settings_folder_still_connects() {
+        let dir = std::env::temp_dir().join(format!("cw-deep-{}", std::process::id())).join("a".repeat(60)).join("b".repeat(60));
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(dir.join(SOCKET).as_os_str().len() > MAX_SOCKET_PATH);
+        let server = LiveServer::start(&dir, || {}).unwrap();
+        let main = std::thread::spawn(move || {
+            for _ in 0..200 {
+                for r in server.drain() {
+                    r.answer(Ok(json!("here")));
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let mut c = LiveClient::connect(&dir).unwrap();
+        assert_eq!(c.request("tabs", json!({})).unwrap(), json!("here"));
+        main.join().unwrap();
+        assert!(!dir.join(ADDR).exists(), "the pointer goes with the window");
     }
 
     #[test]
