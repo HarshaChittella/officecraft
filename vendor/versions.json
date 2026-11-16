@@ -1,0 +1,27 @@
+{
+  "note": "What Craftworks is built from. Written by scripts/upstream.py; see docs/updates.md.",
+  "apps": {
+    "wordcraft": {
+      "release": "0.18.1",
+      "base": "514085ca444ecf0391ee1105a743d225677b391d",
+      "head": "1175b914a9290b511d4418f945923e263ee5b6e9"
+    },
+    "gridcraft": {
+      "release": "0.19.1",
+      "base": "c0ee120ac2d9b59630f5abf1151dd9b471fe2926",
+      "head": "78b14a52eedb2d3a7ff8809d76bd8fd953d2fb49"
+    },
+    "deckcraft": {
+      "release": "0.18.1",
+      "base": "69379cf689f908d23cab9313d59fb9e1fd4b7a4f",
+      "head": "e7c150df93067899ec0dcf96f6923189b37b98c4"
+    },
+    "pdfcraft": {
+      "release": "0.21.1",
+      "base": "e98dc1712c7fa6cd66e87ce02e168afb21d07795",
+      "head": "2e02e6a92eb81c9cae5f4ac3c0305a5860aaa19a"
+    }
+  },
+  "craft_libs": "e2dc681a3ad8a47038da2f11ddd2c5e1c0454991",
+  "egui": "725a39fca940f77149ffbb9c58eef405a16997bc"
+}

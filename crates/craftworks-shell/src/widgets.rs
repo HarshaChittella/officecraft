@@ -154,6 +154,41 @@ pub fn search_field(ui: &mut Ui, p: &Palette, value: &mut String, id: Id, hint: 
     .inner
 }
 
+/// The width [`status_pill`] takes for `label`.
+pub fn pill_width(ui: &Ui, label: &str) -> f32 {
+    ui.painter().layout_no_wrap(label.to_string(), text::meta(), Color32::WHITE).size().x.min(240.0) + 42.0
+}
+
+/// A pill in the title row that says something is going on (an update, the AI): an icon, then
+/// `label`. `attention` fills it with the accent; `busy` turns the icon into a busy ring.
+pub fn status_pill(ui: &mut Ui, p: &Palette, r: Rect, id: Id, label: &str, attention: bool, busy: bool, icon: fn(&egui::Painter, Rect, Color32)) -> Response {
+    let resp = ui.interact(r, id, Sense::click());
+    let (h, down) = hover(ui, &resp);
+    let att = motion::fade(ui.ctx(), id.with("cw_att"), attention, motion::MOVE);
+    let rest = Palette::tint(p.surface_hover, if down { 1.0 } else { h });
+    let fill = Palette::mix(rest, Palette::tint(p.accent, if p.dark { 0.24 } else { 0.13 } + 0.05 * h), att);
+    let corner = CornerRadius::same(255);
+    ui.painter().rect_filled(r, corner, fill);
+    ui.painter().rect_stroke(r, corner, Stroke::new(1.0, Palette::mix(p.hairline, Palette::tint(p.accent, 0.45), att)), egui::StrokeKind::Inside);
+    if resp.has_focus() {
+        focus_ring(ui.painter(), r, 12, p);
+    }
+    let color = Palette::mix(Palette::mix(p.text_muted, p.text, h), p.accent, att);
+    let ir = Rect::from_center_size(pos2(r.left() + 17.0, r.center().y), vec2(14.0, 14.0));
+    if busy {
+        icons::spinner(ui.painter(), ir, ui.input(|i| i.time), color);
+        ui.ctx().request_repaint();
+    } else {
+        icon(ui.painter(), ir, color);
+    }
+    let mut job = egui::text::LayoutJob::simple_singleline(label.to_string(), text::meta(), color);
+    job.wrap = egui::text::TextWrapping::truncate_at_width(r.width() - 40.0);
+    let galley = ui.painter().layout_job(job);
+    ui.painter().galley(pos2(r.left() + 30.0, r.center().y - galley.size().y / 2.0), galley, color);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    resp
+}
+
 /// A section label in spaced small capitals, at `pos` (left, vertical centre).
 pub fn caps(painter: &egui::Painter, pos: egui::Pos2, title: &str, color: Color32) {
     let galley = painter.layout_job(text::caps(title, color));

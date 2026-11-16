@@ -102,6 +102,10 @@ pub struct App {
     pub projects: projects::Projects,
     /// The AI connector's live requests and the changes waiting for review.
     pub ai: crate::ai::AiState,
+    /// New Craft app releases, and rebuilding Craftworks from them (updates.rs).
+    pub updates: crate::updates::Updates,
+    /// Open this bundle once the quit is done (a restart after an update).
+    relaunch: Option<PathBuf>,
     /// The toast about last time's crash report, and the report.
     crash_toast: Option<(u64, PathBuf)>,
     /// The system's display settings as last read, when, and an override for `--check`.
@@ -175,6 +179,8 @@ impl App {
             sidebar: Sidebar::default(),
             projects: projects::Projects::default(),
             ai: crate::ai::AiState::default(),
+            updates: crate::updates::Updates::new(),
+            relaunch: None,
             catalogs: HashMap::new(),
             crash_toast: None,
             display: Default::default(),
@@ -616,6 +622,9 @@ impl App {
                 self.quitting = None;
                 self.quit_confirmed = true;
                 if self.check.is_none() {
+                    if let Some(bundle) = self.relaunch.take() {
+                        crate::updates::relaunch_after_quit(&bundle);
+                    }
                     // AppKit's own terminate: closing the window first can crash on macOS
                     // (craft-quit's notes).
                     craft_quit::quit();
@@ -644,6 +653,7 @@ impl App {
                 self.tabs.activate(TabId(id));
             }
             MenuCommand::Quit => self.start_quit(),
+            MenuCommand::CheckUpdates => self.updates.check(ctx, true),
             MenuCommand::Key(k) => self.document_keys.extend(menu::key_events(&k)),
             MenuCommand::Copy => self.document_keys.push(Event::Copy),
             MenuCommand::Cut => self.document_keys.push(Event::Cut),
@@ -1172,6 +1182,114 @@ impl App {
         self.closing_projects.push(root.to_path_buf());
     }
 
+    /// The update popover under its pill: what is new, then Update, the progress, Restart, or
+    /// what went wrong.
+    fn updates_frame(&mut self, ctx: &egui::Context, p: &Palette) {
+        use craftworks_shell::tokens::{space, text};
+        use craftworks_shell::widgets::{self, ButtonKind};
+        use crate::updates::State;
+        if !self.updates.popover_open {
+            return;
+        }
+        let Some(anchor) = self.updates.pill_rect else {
+            self.updates.popover_open = false;
+            return;
+        };
+        let width = 380.0;
+        let mut update = false;
+        let mut restart = false;
+        let mut show_log = false;
+        let mut close = false;
+        let state = self.updates.state.clone();
+        let pos = pos2((anchor.right() - width).max(8.0), anchor.bottom() + 6.0);
+        let area = egui::Area::new(egui::Id::unique("cw_update_popover")).order(egui::Order::Foreground).fixed_pos(pos).show(ctx, |ui| {
+            widgets::panel_frame(p).show(ui, |ui| {
+                ui.set_width(width - 2.0 * space::L);
+                ui.spacing_mut().item_spacing.y = space::XS;
+                let title = match &state {
+                    State::Available(_) => "New Craft app releases",
+                    State::Updating(_) => "Updating Craftworks",
+                    State::Ready => "Craftworks is updated",
+                    State::Failed(_) => "The update didn't finish",
+                    _ => "Updates",
+                };
+                ui.label(egui::RichText::new(title).font(text::heading()).color(p.text));
+                match &state {
+                    State::Available(apps) => {
+                        ui.add_space(space::XS);
+                        for a in apps {
+                            ui.horizontal(|ui| {
+                                ui.label(egui::RichText::new(&a.name).font(text::card()).color(p.text));
+                                ui.label(egui::RichText::new(format!("{} → {}", a.have, a.latest)).color(p.text_muted));
+                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                    if ui.link(egui::RichText::new("What's new").font(text::meta())).clicked() {
+                                        let _ = std::process::Command::new("/usr/bin/open").arg(&a.url).spawn();
+                                    }
+                                });
+                            });
+                        }
+                        ui.add_space(space::S);
+                        ui.label(
+                            egui::RichText::new("Craftworks rebuilds itself on this Mac from these releases, then checks itself. It takes several minutes and you can keep working; a test window opens briefly.")
+                                .font(text::meta())
+                                .color(p.text_muted),
+                        );
+                        ui.add_space(space::S);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            update = widgets::button(ui, p, "Update Craftworks", ButtonKind::Primary, true).clicked();
+                            close = widgets::button(ui, p, "Later", ButtonKind::Secondary, true).clicked();
+                        });
+                    }
+                    State::Updating(stage) => {
+                        ui.label(egui::RichText::new(stage).color(p.text_muted));
+                        ui.add_space(space::S);
+                        ui.label(egui::RichText::new("You can keep working. Craftworks says when it's ready.").font(text::meta()).color(p.text_muted));
+                        ui.add_space(space::S);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            show_log = widgets::button(ui, p, "Show Log", ButtonKind::Secondary, self.updates.log.is_some()).clicked();
+                        });
+                    }
+                    State::Ready => {
+                        ui.label(egui::RichText::new("Restart Craftworks to use the new version. You'll be asked about anything unsaved, and your tabs come back.").color(p.text_muted));
+                        ui.add_space(space::S);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            restart = widgets::button(ui, p, "Restart Now", ButtonKind::Primary, true).clicked();
+                            close = widgets::button(ui, p, "Later", ButtonKind::Secondary, true).clicked();
+                        });
+                    }
+                    State::Failed(msg) => {
+                        ui.label(egui::RichText::new(msg).color(p.text_muted));
+                        ui.add_space(space::XS);
+                        ui.label(egui::RichText::new("Nothing was changed: this version stays as it is.").font(text::meta()).color(p.text_muted));
+                        ui.add_space(space::S);
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            update = widgets::button(ui, p, "Try Again", ButtonKind::Primary, true).clicked();
+                            show_log = widgets::button(ui, p, "Show Log", ButtonKind::Secondary, self.updates.log.is_some()).clicked();
+                        });
+                    }
+                    _ => {}
+                }
+            });
+        });
+        let clicked_outside = ctx.input(|i| i.pointer.any_click())
+            && !area.response.contains_pointer()
+            && !ctx.input(|i| i.pointer.interact_pos().is_some_and(|q| anchor.contains(q)));
+        if close || clicked_outside || ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            self.updates.popover_open = false;
+        }
+        if update {
+            self.updates.start_update(ctx);
+        }
+        if show_log && let Some(log) = &self.updates.log {
+            let _ = std::process::Command::new("/usr/bin/open").arg("-R").arg(log).spawn();
+        }
+        if restart {
+            self.updates.popover_open = false;
+            self.relaunch = Some(self.updates.relaunch_target());
+            self.start_quit();
+        }
+    }
+
     fn on_newtab_action(&mut self, a: NewTabAction) {
         match a {
             NewTabAction::New(kind) => self.new_document(kind),
@@ -1439,6 +1557,17 @@ impl eframe::App for App {
         }
         self.sync_display(&ctx);
         self.sync_appearance(&ctx);
+        if self.frames == 2 && self.check.is_none() {
+            self.updates.check_if_due(&ctx);
+        }
+        self.updates.tick();
+        for (error, text) in std::mem::take(&mut self.updates.notices) {
+            if error {
+                self.toasts.error(text);
+            } else {
+                self.toasts.info(text);
+            }
+        }
         self.menu_frame(&ctx);
         self.shortcuts();
         for p in std::mem::take(&mut self.dropped_to_open) {
@@ -1474,8 +1603,22 @@ impl eframe::App for App {
         egui::Panel::top("cw_title").exact_size(tb.height).show_separator_line(false).frame(egui::Frame::NONE.fill(p.band)).show(ui, |ui| {
             let r = ui.max_rect();
             ui.painter().hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, p.hairline));
-            // The AI's pill at the right, once an AI has been in touch.
             let mut right = r.right() - 12.0;
+            // An update's pill at the right (updates.rs).
+            self.updates.pill_rect = None;
+            if let Some(label) = self.updates.pill_label() {
+                let w = craftworks_shell::widgets::pill_width(ui, &label);
+                let pr = Rect::from_min_size(pos2(right - w, r.center().y - 12.0), egui::vec2(w, 24.0));
+                let attention = !matches!(self.updates.state, crate::updates::State::Failed(_));
+                let busy = self.updates.busy();
+                let resp = craftworks_shell::widgets::status_pill(ui, &p, pr, egui::Id::unique("cw_update_pill"), &label, attention, busy, craftworks_shell::icons::update);
+                if resp.on_hover_text("Craftworks can be rebuilt with the Craft apps' newest releases").clicked() {
+                    self.updates.popover_open = !self.updates.popover_open;
+                }
+                self.updates.pill_rect = Some(pr);
+                right = pr.left() - 8.0;
+            }
+            // The AI's pill, once an AI has been in touch.
             let now = ctx.input(|i| i.time);
             self.ai.pill_rect = None;
             if let Some(status) = self.ai.status(now) {
@@ -1585,6 +1728,7 @@ impl eframe::App for App {
                 self.on_review(a);
             }
         }
+        self.updates_frame(&ctx, &p);
         if let Some(clicked) = self.toasts.show(&ctx, &p, self.content_rect)
             && let Some((id, report)) = self.crash_toast.take()
         {

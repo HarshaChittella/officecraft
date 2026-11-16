@@ -46,6 +46,8 @@ pub enum MenuCommand {
     SearchProject,
     /// The chrome's text size, in percent.
     TextScale(u32),
+    /// Craftworks ▸ Check for Updates…
+    CheckUpdates,
 }
 
 impl MenuCommand {
@@ -71,6 +73,7 @@ impl MenuCommand {
             MenuCommand::ToggleSidebar => "cw.sidebar".into(),
             MenuCommand::SearchProject => "cw.search".into(),
             MenuCommand::TextScale(p) => format!("cw.textScale:{p}"),
+            MenuCommand::CheckUpdates => "cw.checkUpdates".into(),
         }
     }
 
@@ -95,6 +98,7 @@ impl MenuCommand {
             ("cw.app", Some(c)) => MenuCommand::AppMenu(c.to_string()),
             ("cw.sidebar", None) => MenuCommand::ToggleSidebar,
             ("cw.search", None) => MenuCommand::SearchProject,
+            ("cw.checkUpdates", None) => MenuCommand::CheckUpdates,
             ("cw.textScale", Some(p)) => MenuCommand::TextScale(p.parse().ok()?),
             (h, None) if h.starts_with("cw.new.") => {
                 let label = h.trim_start_matches("cw.new.");
@@ -465,7 +469,14 @@ pub fn bar(s: &MenuState<'_>, app: AppMenus<'_>) -> MenuBar {
         }
     }
     let mut menus = vec![
-        Menu::new("Craftworks", vec![Node::Item(Item::new(CommandRef::new(MenuCommand::Quit.id()), "Quit Craftworks").role(ItemRole::Quit))])
+        Menu::new(
+            "Craftworks",
+            vec![
+                Node::Item(Item::new(CommandRef::new(MenuCommand::CheckUpdates.id()), "Check for Updates…")),
+                Node::Separator,
+                Node::Item(Item::new(CommandRef::new(MenuCommand::Quit.id()), "Quit Craftworks").role(ItemRole::Quit)),
+            ],
+        )
             .role(MenuRole::App),
         Menu::new("File", tidy(file)).role(MenuRole::File),
         Menu::new("Edit", tidy(edit)).role(MenuRole::Edit),

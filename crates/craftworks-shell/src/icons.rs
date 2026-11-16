@@ -200,6 +200,13 @@ pub fn sidebar(p: &Painter, r: Rect, open: bool, color: Color32) {
     p.line_segment([at(r, 6.25, 3.0), at(r, 6.25, 13.0)], Stroke::new(STROKE * s, color));
 }
 
+/// An update: an arrow coming down into a tray.
+pub fn update(p: &Painter, r: Rect, color: Color32) {
+    line(p, r, &[(8.0, 2.5), (8.0, 10.0)], color);
+    line(p, r, &[(4.75, 7.0), (8.0, 10.25), (11.25, 7.0)], color);
+    line(p, r, &[(2.75, 10.5), (2.75, 13.25), (13.25, 13.25), (13.25, 10.5)], color);
+}
+
 /// A busy ring: a faint track with a bright arc going round. `time` is in seconds.
 pub fn spinner(p: &Painter, r: Rect, time: f64, color: Color32) {
     ring(p, r, (8.0, 8.0), 5.25, STROKE, Palette::tint(color, 0.22));

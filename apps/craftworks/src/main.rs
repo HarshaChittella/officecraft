@@ -24,6 +24,7 @@ mod projects;
 mod session;
 mod settings;
 mod titlebar;
+mod updates;
 
 use std::path::PathBuf;
 

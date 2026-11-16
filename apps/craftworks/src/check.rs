@@ -57,6 +57,10 @@ enum Stage {
         n: u8,
         started: Option<usize>,
     },
+    /// The "Update available" pill and its popover (updates.rs), with a made-up release.
+    UpdatePill {
+        shot: bool,
+    },
     Report,
     Done,
 }
@@ -1476,7 +1480,34 @@ impl Check {
                         self.stage = Stage::Templates { n: n + 1, started: None };
                     }
                     // (A blank PDF is new, unsaved work: it would add a prompt to the quit below.)
-                    (None, _) => self.stage = Stage::Quit { phase: 0 },
+                    (None, _) => self.stage = Stage::UpdatePill { shot: false },
+                }
+            }
+            Stage::UpdatePill { shot } => {
+                use crate::updates::{AppUpdate, State};
+                if !shot && !matches!(app.updates.state, State::Available(_)) {
+                    app.updates.state = State::Available(vec![AppUpdate {
+                        name: "WordCraft".into(),
+                        have: "0.18.1".into(),
+                        latest: "0.19.0".into(),
+                        url: "https://github.com/storytold/wordcraft/releases".into(),
+                    }]);
+                    app.updates.popover_open = true;
+                    self.wait = 20;
+                } else if !shot {
+                    self.check(
+                        app.updates.pill_rect.is_some() && app.updates.popover_open,
+                        "a newer Craft app release shows \"Update available\" in the title row, with its popover",
+                    );
+                    self.screenshot(ctx, "update-available");
+                    // Kept up until the screenshot is taken, on a later frame.
+                    self.stage = Stage::UpdatePill { shot: true };
+                    self.wait = 20;
+                } else {
+                    app.updates.state = State::Idle;
+                    app.updates.popover_open = false;
+                    self.stage = Stage::Quit { phase: 0 };
+                    self.wait = 5;
                 }
             }
             Stage::Report => {
