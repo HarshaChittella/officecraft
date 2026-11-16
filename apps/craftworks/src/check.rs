@@ -43,6 +43,7 @@ enum Stage {
     Services { phase: u8 },
     Projects { phase: u8 },
     Ai { phase: u8 },
+    BlankClose { phase: u8 },
     Resize { i: usize, frames: u32 },
     Accessibility { frames: u32 },
     Menus { phase: u8 },
@@ -252,9 +253,15 @@ impl Check {
             return;
         }
         ctx.request_repaint();
-        if let Some(done) = &self.shot_done {
-            if !done.load(Ordering::SeqCst) {
+        if let Some(done) = self.shot_done.clone() {
+            // A window macOS doesn't draw (covered, or on another Space) may never deliver its
+            // screenshot: after 10 s, note it and go on rather than wait for ever.
+            if !done.load(Ordering::SeqCst) && self.still_waiting(ctx, 10.0) {
                 return;
+            }
+            self.done_waiting();
+            if !done.load(Ordering::SeqCst) {
+                log::warn!("a screenshot didn't arrive in 10 s (was the window covered?)");
             }
             self.shot_done = None;
         }
@@ -1030,13 +1037,51 @@ impl Check {
                             rot.is_some() && rot == self.pdf_rotation,
                             format!("Undo in the review panel takes the PDF edit back (rotation {rot:?})"),
                         );
-                        self.stage = Stage::DirtyClose { phase: 0 };
+                        self.stage = Stage::BlankClose { phase: 0 };
                         self.wait = 5;
                         return;
                     }
                     _ => {}
                 }
                 self.stage = Stage::Ai { phase: phase + 1 };
+            }
+            // The reported bug: with a PDF in front, a new empty sheet's tab wouldn't close
+            // (GridCraft's own blank Book1 took its place as a new tab).
+            Stage::BlankClose { phase } => {
+                let sheets = |app: &App| app.tabs.iter().filter(|t| t.kind == Kind::Sheet).count();
+                match phase {
+                    0 => {
+                        if let Some((tab, _)) = Self::tab_of(app, Kind::Pdf) {
+                            app.tabs.activate(tab);
+                        }
+                        self.tries = sheets(app) as u32;
+                        app.new_document(Kind::Sheet);
+                        self.wait = 8;
+                    }
+                    1 => {
+                        let made = sheets(app) as u32 == self.tries + 1;
+                        if let Some(id) = app.tabs.active().filter(|t| t.kind == Kind::Sheet).map(|t| t.id) {
+                            app.close_tab(id);
+                        }
+                        self.check(made, "New Sheet with a PDF in front makes a sheet tab");
+                        self.wait = 20;
+                    }
+                    _ => {
+                        let left = sheets(app) as u32;
+                        self.check(
+                            left == self.tries,
+                            format!(
+                                "closing the new, empty sheet closes its tab, and no other sheet takes its place ({left} sheet tabs, {} before)",
+                                self.tries
+                            ),
+                        );
+                        self.tries = 0;
+                        self.stage = Stage::DirtyClose { phase: 0 };
+                        self.wait = 5;
+                        return;
+                    }
+                }
+                self.stage = Stage::BlankClose { phase: phase + 1 };
             }
             Stage::Resize { i, frames } => {
                 let Some(size) = SIZES.get(i).copied() else {

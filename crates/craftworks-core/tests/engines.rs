@@ -445,3 +445,23 @@ fn live_tool_calls_edit_the_open_pdf_and_undo() {
     assert_eq!(rotation(&mut ed), Some(0), "PdfCraft's Undo takes the AI's edit back");
     assert!(ed.control(doc, "document.inspect", json!({})).is_err(), "PdfCraft answers tools/call only");
 }
+
+/// A new, empty document closes at once, and no other document turns up in its place: the
+/// blank one an app makes for itself at start never becomes a tab (the "sheet that won't
+/// close": GridCraft's own Book1 took the closed sheet's place).
+#[test]
+fn a_new_empty_document_closes_and_nothing_takes_its_place() {
+    for kind in [Kind::Sheet, Kind::Document, Kind::Presentation] {
+        let ctx = egui::Context::default();
+        let mut ed = new_editor(kind);
+        frames(&ctx, ed.as_mut(), 2);
+        let at_start: Vec<_> = ed.documents().iter().map(|d| d.title.clone()).collect();
+        let doc = ed.new_document().unwrap();
+        frames(&ctx, ed.as_mut(), 2);
+        ed.request_close(doc).unwrap();
+        frames(&ctx, ed.as_mut(), 2);
+        let after: Vec<_> = ed.documents().iter().map(|d| d.title.clone()).collect();
+        assert_eq!(ed.close_state(doc), CloseState::Closed, "{kind:?}: still open, prompt {}", ed.close_prompt_open());
+        assert!(after.is_empty(), "{kind:?}: {after:?} appeared in its place (open at start: {at_start:?})");
+    }
+}

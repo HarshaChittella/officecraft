@@ -12,6 +12,8 @@ pub struct SheetEditor {
     app: SheetApp,
     /// AutoSave as it was before an AI's edits paused it.
     autosave_before: Option<bool>,
+    /// GridCraft's own blank workbook, set aside (never a tab).
+    blanks: super::blanks::Blanks,
 }
 
 impl SheetEditor {
@@ -21,7 +23,7 @@ impl SheetEditor {
 
     /// GridCraft with the host's services (clipboard, panels, printing).
     pub fn with_services(services: Services) -> Self {
-        SheetEditor { app: SheetApp::new(Session::new(), services), autosave_before: None }
+        SheetEditor { app: SheetApp::new(Session::new(), services), autosave_before: None, blanks: Default::default() }
     }
 
     pub fn app(&mut self) -> &mut SheetApp {
@@ -40,6 +42,18 @@ impl SheetEditor {
     }
 }
 
+impl SheetEditor {
+    /// Every window, and whether its workbook is untouched (no file, nothing changed).
+    fn seen(&self) -> Vec<super::blanks::Seen> {
+        let s = &self.app.session;
+        s.windows()
+            .iter()
+            .filter(|w| !w.hidden)
+            .map(|w| (w.id, s.documents().iter().find(|d| d.uid == w.doc_uid).is_some_and(|d| d.path.is_none() && !d.is_dirty())))
+            .collect()
+    }
+}
+
 impl Default for SheetEditor {
     fn default() -> Self {
         Self::new()
@@ -53,9 +67,10 @@ impl Editor for SheetEditor {
 
     fn documents(&self) -> Vec<DocInfo> {
         let s = &self.app.session;
+        let set_aside = self.blanks.pristine(&self.seen());
         s.windows()
             .iter()
-            .filter(|w| !w.hidden)
+            .filter(|w| !w.hidden && !set_aside.contains(&w.id))
             .map(|w| {
                 let book = s.documents().iter().find(|d| d.uid == w.doc_uid);
                 DocInfo {
@@ -81,13 +96,31 @@ impl Editor for SheetEditor {
     }
 
     fn new_document(&mut self) -> Result<DocId> {
+        let seen = self.seen();
+        self.blanks.note_startup(&seen);
+        // GridCraft's blank workbook is the new sheet (a fresh Book1 is replaced, not kept).
+        if let Some(id) = self.blanks.take(&seen) {
+            self.app.enter_window(id);
+            return Ok(DocId(id));
+        }
         let reply = self.app.run("file.new", json!({}))?;
         self.after_open(&reply)
     }
 
     fn open(&mut self, path: &Path) -> Result<Opened> {
+        self.blanks.note_startup(&self.seen());
         let reply = self.app.run("file.open", json!({"path": path_str(path)?}))?;
-        self.after_open(&reply).map(Opened::Now)
+        let doc = self.after_open(&reply)?;
+        // The opened file replaces the untouched blank workbook.
+        for id in self.blanks.pristine(&self.seen()) {
+            if id != doc.0 {
+                self.app.enter_window(id);
+                let _ = self.app.run("file.close", json!({}));
+            }
+        }
+        self.blanks.clear();
+        self.app.enter_window(doc.0);
+        Ok(Opened::Now(doc))
     }
 
     fn save(&mut self, doc: DocId) -> Result<()> {
@@ -107,8 +140,12 @@ impl Editor for SheetEditor {
 
     fn request_close(&mut self, doc: DocId) -> Result<()> {
         self.ensure_active(doc)?;
+        let seen = self.seen();
+        self.blanks.note_startup(&seen);
+        let before: Vec<u64> = seen.iter().map(|d| d.0).collect();
         // Closes the window; a workbook's last window asks Save / Don't Save / Cancel when dirty.
         self.app.run("file.close", json!({}))?;
+        self.blanks.after_close(&before, &self.seen());
         Ok(())
     }
 
@@ -152,6 +189,9 @@ impl Editor for SheetEditor {
 
     fn logic(&mut self, ctx: &egui::Context) {
         self.app.logic(ctx);
+        let seen = self.seen();
+        self.blanks.note_startup(&seen);
+        self.blanks.adopt(&seen);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) {

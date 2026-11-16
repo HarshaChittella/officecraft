@@ -12,6 +12,8 @@ pub struct WordEditor {
     app: WordApp,
     /// AutoSave as it was before an AI's edits paused it.
     autosave_before: Option<bool>,
+    /// WordCraft's own blank document, set aside (never a tab).
+    blanks: super::blanks::Blanks,
 }
 
 impl WordEditor {
@@ -23,7 +25,7 @@ impl WordEditor {
     pub fn with_services(services: Services) -> Self {
         let mut app = WordApp::new(Session::new(wordcraft_doc::Document::new()), services);
         app.use_one_window();
-        WordEditor { app, autosave_before: None }
+        WordEditor { app, autosave_before: None, blanks: Default::default() }
     }
 
     /// The wrapped app, for the host's own needs (control, tests).
@@ -43,6 +45,13 @@ impl WordEditor {
     }
 }
 
+impl WordEditor {
+    /// Every document, and whether it's untouched (no file, nothing changed).
+    fn seen(&self) -> Vec<super::blanks::Seen> {
+        self.app.session.documents().into_iter().map(|d| (d.id, d.path.is_none() && !d.dirty)).collect()
+    }
+}
+
 impl Default for WordEditor {
     fn default() -> Self {
         Self::new()
@@ -55,7 +64,14 @@ impl Editor for WordEditor {
     }
 
     fn documents(&self) -> Vec<DocInfo> {
-        self.app.session.documents().into_iter().map(|d| DocInfo { id: DocId(d.id), title: d.title, path: d.path, dirty: d.dirty }).collect()
+        let set_aside = self.blanks.pristine(&self.seen());
+        self.app
+            .session
+            .documents()
+            .into_iter()
+            .filter(|d| !set_aside.contains(&d.id))
+            .map(|d| DocInfo { id: DocId(d.id), title: d.title, path: d.path, dirty: d.dirty })
+            .collect()
     }
 
     fn active(&self) -> Option<DocId> {
@@ -68,13 +84,30 @@ impl Editor for WordEditor {
     }
 
     fn new_document(&mut self) -> Result<DocId> {
+        let seen = self.seen();
+        self.blanks.note_startup(&seen);
+        // WordCraft's blank document is the new one (a fresh Document1 is replaced, not kept).
+        if let Some(id) = self.blanks.take(&seen) {
+            self.activate(DocId(id))?;
+            return Ok(DocId(id));
+        }
         self.app.run("file.new", json!({}))?;
         Ok(self.active_id())
     }
 
     fn open(&mut self, path: &Path) -> Result<Opened> {
+        self.blanks.note_startup(&self.seen());
         self.app.open_file(path_str(path)?, None)?;
-        Ok(Opened::Now(self.active_id()))
+        let doc = self.active_id().0;
+        // The opened file replaces the untouched blank document.
+        for id in self.blanks.pristine(&self.seen()) {
+            if id != doc && self.app.session.activate(id).is_ok() {
+                let _ = self.app.run("file.close", json!({}));
+            }
+        }
+        self.blanks.clear();
+        let _ = self.app.session.activate(doc);
+        Ok(Opened::Now(DocId(doc)))
     }
 
     fn save(&mut self, doc: DocId) -> Result<()> {
@@ -94,8 +127,12 @@ impl Editor for WordEditor {
 
     fn request_close(&mut self, doc: DocId) -> Result<()> {
         self.ensure_active(doc)?;
+        let seen = self.seen();
+        self.blanks.note_startup(&seen);
+        let before: Vec<u64> = seen.iter().map(|d| d.0).collect();
         // `run` is the user's path: a document with unsaved changes asks first.
         self.app.run("file.close", json!({}))?;
+        self.blanks.after_close(&before, &self.seen());
         Ok(())
     }
 
@@ -139,6 +176,9 @@ impl Editor for WordEditor {
     }
 
     fn logic(&mut self, ctx: &egui::Context) {
+        let seen = self.seen();
+        self.blanks.note_startup(&seen);
+        self.blanks.adopt(&seen);
         self.app.logic(ctx);
     }
 

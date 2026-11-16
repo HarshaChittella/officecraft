@@ -2,6 +2,7 @@
 //! (docs/decisions.md D2) and drives it only through the app's public API: no editor is
 //! re-implemented here.
 
+mod blanks;
 mod deck;
 mod pdf;
 mod sheet;
