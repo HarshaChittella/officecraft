@@ -5,9 +5,11 @@
 [submodule "vendor/gridcraft"]
 	path = vendor/gridcraft
 	url = https://github.com/HarshaChittella/gridcraft.git
+	branch = craftworks/hosted
 [submodule "vendor/deckcraft"]
 	path = vendor/deckcraft
 	url = https://github.com/HarshaChittella/deckcraft.git
+	branch = craftworks/hosted
 [submodule "vendor/pdfcraft"]
 	path = vendor/pdfcraft
 	url = https://github.com/HarshaChittella/pdfcraft.git

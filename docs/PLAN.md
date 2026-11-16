@@ -388,7 +388,7 @@ Done when: a signed, notarised `.dmg` installs and runs on a clean Mac of each a
   - Where releases are published (updates).
   - The clean-Mac tests.
   - The VoiceOver pass.
-  - A licence for Craftworks itself: Cargo.toml says MIT OR Apache-2.0, but the repo has no LICENSE files.
+  - ~~A licence for Craftworks itself~~: done, MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE), as the Craft apps.
 
 ---
 

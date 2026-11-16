@@ -1,0 +1,62 @@
+# Builds Craftworks on every push to main (and by hand): the Windows .exe as a downloadable
+# zip, and the macOS build with its unit tests. Runs only for this repository's own pushes:
+# nothing here uses secrets.
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: cargo build --release -p craftworks
+      - name: Package
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
+          $name = "Craftworks-$version-windows-x64"
+          New-Item -ItemType Directory -Force "out/$name/Licenses" | Out-Null
+          Copy-Item target/release/craftworks.exe "out/$name/Craftworks.exe"
+          Copy-Item docs/licences.md, LICENSE-MIT, LICENSE-APACHE "out/$name/Licenses/"
+          foreach ($repo in 'wordcraft','gridcraft','deckcraft','pdfcraft','craft-fonts','craft-libs') {
+            Get-ChildItem "vendor/$repo" -File | Where-Object { $_.Name -match '^(ATTRIBUTION\..*|NOTICE|LICENSES\.toml)$' } |
+              ForEach-Object { Copy-Item $_.FullName "out/$name/Licenses/$repo-$($_.Name)" }
+          }
+          "name=$name" >> $env:GITHUB_ENV
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.name }}
+          path: out/${{ env.name }}
+          retention-days: 30
+
+  macos:
+    runs-on: macos-15
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Free disk space
+        run: df -h / && sudo rm -rf /Applications/Xcode_1[0-5]*.app /Users/runner/Library/Android 2>/dev/null; df -h /
+      - name: Build
+        run: cargo build --profile measure -p craftworks
+      - name: Unit tests
+        run: cargo test --profile measure -p craftworks-shell -p craftworks-core -p craftworks-mcp -p craftworks-platform -p craftworks

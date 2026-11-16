@@ -112,7 +112,7 @@ Our glue code (`crates/craftworks-core/src/engines/*.rs`) reaches into each app'
 
 - **Developer ID Application certificate** in this Mac's keychain, and a **notarytool profile** (`craftworks-notary`).
 - **A public repo for releases.** The source can stay private in a separate repo: `craft-update` reads releases without signing in, so the releases repo must be public.
-- **Forks for GridCraft and DeckCraft** in `.gitmodules`. The `fork` remotes already point at `HarshaChittella`.
+- ~~Forks for GridCraft and DeckCraft~~: done; all four apps come from the HarshaChittella forks.
 - **A licence for Craftworks**, before anything is distributed (open in PLAN Phase 8).
 
 ## Milestones
