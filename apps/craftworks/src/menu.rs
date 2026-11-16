@@ -44,6 +44,8 @@ pub enum MenuCommand {
     AppMenu(String),
     ToggleSidebar,
     SearchProject,
+    /// The chrome's text size, in percent.
+    TextScale(u32),
 }
 
 impl MenuCommand {
@@ -68,6 +70,7 @@ impl MenuCommand {
             MenuCommand::AppMenu(key) => format!("cw.app:{key}"),
             MenuCommand::ToggleSidebar => "cw.sidebar".into(),
             MenuCommand::SearchProject => "cw.search".into(),
+            MenuCommand::TextScale(p) => format!("cw.textScale:{p}"),
         }
     }
 
@@ -92,6 +95,7 @@ impl MenuCommand {
             ("cw.app", Some(c)) => MenuCommand::AppMenu(c.to_string()),
             ("cw.sidebar", None) => MenuCommand::ToggleSidebar,
             ("cw.search", None) => MenuCommand::SearchProject,
+            ("cw.textScale", Some(p)) => MenuCommand::TextScale(p.parse().ok()?),
             (h, None) if h.starts_with("cw.new.") => {
                 let label = h.trim_start_matches("cw.new.");
                 MenuCommand::New(Kind::ALL.into_iter().find(|k| k.label() == label)?)
@@ -406,6 +410,18 @@ pub fn bar(s: &MenuState<'_>, app: AppMenus<'_>) -> MenuBar {
         Node::Separator,
         item(MenuCommand::ToggleSidebar, "Show or Hide Sidebar", Some("⌃⌘S")),
         item(MenuCommand::SearchProject, "Search Project…", Some("⌃⇧F")),
+        Node::Submenu {
+            label: "Interface Text Size".into(),
+            children: craftworks_shell::tokens::text::SCALES
+                .iter()
+                .map(|(p, name)| {
+                    let label = if *p == craftworks_shell::tokens::text::scale() { format!("✓ {name}") } else { (*name).to_string() };
+                    item(MenuCommand::TextScale(*p), &label, None)
+                })
+                .collect(),
+            platforms: Default::default(),
+            role: None,
+        },
     ];
     let mut help: Vec<Node> = Vec::new();
     // The app's menus between View and Window; its File, Edit, View and Help items join ours.

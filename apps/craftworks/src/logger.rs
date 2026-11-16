@@ -4,6 +4,9 @@
 use std::sync::Mutex;
 
 static WARNINGS: Mutex<Vec<String>> = Mutex::new(Vec::new());
+/// The last lines logged at any level shown, for crash reports.
+static RECENT: Mutex<std::collections::VecDeque<String>> = Mutex::new(std::collections::VecDeque::new());
+const RECENT_LINES: usize = 200;
 
 struct Logger;
 
@@ -18,6 +21,12 @@ impl log::Log for Logger {
         }
         let line = format!("[{} {}] {}", r.level(), r.target(), r.args());
         eprintln!("{line}");
+        if let Ok(mut q) = RECENT.lock() {
+            if q.len() >= RECENT_LINES {
+                q.pop_front();
+            }
+            q.push_back(line.clone());
+        }
         if r.level() <= log::Level::Warn
             && let Ok(mut w) = WARNINGS.lock()
         {
@@ -46,4 +55,9 @@ pub fn install() {
 /// The warnings logged so far.
 pub fn warnings() -> Vec<String> {
     WARNINGS.lock().map(|w| w.clone()).unwrap_or_default()
+}
+
+/// The last lines logged (for crash reports).
+pub fn recent() -> Vec<String> {
+    RECENT.lock().map(|q| q.iter().cloned().collect()).unwrap_or_default()
 }

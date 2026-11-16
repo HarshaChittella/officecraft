@@ -342,6 +342,16 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 
 - WordCraft and GridCraft save a changed file within a few seconds when AutoSave is on, which would save an AI's edit before you see it. While an app has AI edits in the review list, Craftworks turns its AutoSave off. Keep or Undo puts it back as it was. DeckCraft only writes AutoRecover copies, so it's left alone.
 
+## D46 Display settings: the system's for motion and contrast, the app's for text size. SETTLED 2026-11-16
+
+- Reduce motion and Increase contrast come from `NSWorkspace` (safe objc2 calls), re-read at most once a second while frames run, so they add no wake-ups.
+- macOS's preferred text sizes are only reachable through `unsafe` AppKit calls (`preferredFontForTextStyle`), which D24 rules out. So the chrome has its own View ▸ Interface Text Size; the documents keep their apps' own zoom.
+
+## D47 The blank document an app keeps for itself is set aside. SETTLED 2026-11-16
+
+- GridCraft and WordCraft are never empty: they open an untitled blank at start and make another when their last document closes. Craftworks used to adopt it as a tab, so closing your new sheet left "Book1" in its place (the owner's bug report).
+- `engines/blanks.rs` keeps it out of the list. The next New reuses it, the way a fresh Book1 is replaced; opening a file closes it. An app's own New still makes a tab.
+
 ## Upstream test results (task 0.6)
 
 Runs on 2026-11-14. Every run is logged under `plan/logs/` (gitignored), one timestamped file per run.

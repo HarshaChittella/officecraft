@@ -7,11 +7,22 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 profile="${1:-measure}"
+# No licence outside the allowlist gets into a build (docs/licences.md, Phase 8.4).
+python3 scripts/licences.py
 cargo build -p craftworks --profile "$profile"
 app=build/Craftworks.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "target/$profile/craftworks" "$app/Contents/MacOS/craftworks"
+
+# Licences: the report, and each Craft repo's own credits for what it bundles.
+mkdir -p "$app/Contents/Resources/Licenses"
+cp docs/licences.md "$app/Contents/Resources/Licenses/"
+for repo in wordcraft gridcraft deckcraft pdfcraft craft-fonts craft-libs; do
+  for f in vendor/$repo/ATTRIBUTION.* vendor/$repo/NOTICE vendor/$repo/LICENSES.toml; do
+    [ -f "$f" ] && cp "$f" "$app/Contents/Resources/Licenses/$repo-$(basename "$f")"
+  done
+done
 
 # The icon: our own artwork, drawn in code.
 iconset=$(mktemp -d)/Craftworks.iconset

@@ -92,6 +92,12 @@ pub struct App {
     pub projects: projects::Projects,
     /// The AI connector's live requests and the changes waiting for review.
     pub ai: crate::ai::AiState,
+    /// The toast about last time's crash report, and the report.
+    crash_toast: Option<(u64, PathBuf)>,
+    /// The system's display settings as last read, when, and an override for `--check`.
+    display: craftworks_platform::display::DisplayPrefs,
+    display_read: f64,
+    display_override: Option<craftworks_platform::display::DisplayPrefs>,
     /// Each app's commands for its menus, read once (craftworks_core::catalog).
     catalogs: HashMap<Kind, Vec<craftworks_core::catalog::MenuEntry>>,
     /// Projects being closed from their group's menu, waiting for their tabs to close.
@@ -113,6 +119,7 @@ pub struct App {
 impl App {
     pub fn new(render: egui_wgpu::RenderState, ctx: &egui::Context, forced_dark: Option<bool>, platform: craftworks_platform::Platform) -> Self {
         ctx.set_fonts(tokens::fonts());
+        tokens::text::set_scale(settings::load_text_scale());
         let palette = Palette::for_dark(forced_dark.unwrap_or(false));
         tokens::apply(ctx, &palette);
         let a11y = std::sync::Arc::new(std::sync::Mutex::new(craftworks_render::a11y::Shared::default()));
@@ -155,6 +162,10 @@ impl App {
             projects: projects::Projects::default(),
             ai: crate::ai::AiState::default(),
             catalogs: HashMap::new(),
+            crash_toast: None,
+            display: Default::default(),
+            display_read: 0.0,
+            display_override: None,
             closing_projects: Vec::new(),
             last_front: None,
             closed: Vec::new(),
@@ -419,7 +430,17 @@ impl App {
         }
     }
 
+    /// Mentions a crash report written since the last launch, with a button to show it.
+    pub fn mention_crash(&mut self) {
+        if let Some(report) = crate::crash::dir().and_then(|d| crate::crash::unseen(&d)) {
+            let id = self.toasts.with_action("Craftworks quit unexpectedly last time.", "Show Report");
+            self.crash_toast = Some((id, report));
+        }
+    }
+
     pub fn with_check(mut self, c: check::Check) -> Self {
+        // The check's results mustn't depend on this Mac's accessibility settings.
+        self.display_override = Some(Default::default());
         self.check = Some(c);
         self
     }
@@ -556,6 +577,10 @@ impl App {
             }
             MenuCommand::ToggleSidebar => self.sidebar.toggle(),
             MenuCommand::SearchProject => self.sidebar.focus_search(),
+            MenuCommand::TextScale(p) => {
+                self.set_text_scale(ctx, p);
+                settings::save_text_scale(p);
+            }
             MenuCommand::Run(id) => {
                 if let Some(kind) = self.tabs.active().map(|t| t.kind)
                     && let Err(e) = self.engine(kind).editor_mut().run_command(&id, serde_json::json!({}))
@@ -620,6 +645,7 @@ impl App {
         self.recent.files().len().hash(&mut h);
         self.recent.files().first().map(|f| f.path.clone()).hash(&mut h);
         self.closed.is_empty().hash(&mut h);
+        tokens::text::scale().hash(&mut h);
         let state = h.finish();
         let bar = (state != self.menu_state).then(|| self.menu_bar());
         let modal = self.tabs.active().and_then(|t| self.engines.get(&t.kind)).is_some_and(|e| e.editor().close_prompt_open());
@@ -643,11 +669,46 @@ impl App {
     pub fn engine(&mut self, kind: Kind) -> &mut EngineHost {
         let (device, format, dark) = (&self.render.device, self.render.target_format, self.dark.unwrap_or(false));
         let platform = &self.platform;
+        let reduce = self.display.reduce_motion;
         self.engines.entry(kind).or_insert_with(|| {
             let mut host = EngineHost::new(device, format, craftworks_platform::editor(kind, platform));
             host.editor_mut().set_dark(dark);
+            apply_motion(host.context(), reduce);
             host
         })
+    }
+
+    /// Follows the system's Reduce motion and Increase contrast (read at most once a second,
+    /// and only while frames run anyway: no wake-ups of its own).
+    fn sync_display(&mut self, ctx: &egui::Context) {
+        let now = ctx.input(|i| i.time);
+        if now - self.display_read < 1.0 && self.display_read > 0.0 {
+            return;
+        }
+        self.display_read = now;
+        let prefs = self.display_override.unwrap_or_else(craftworks_platform::display::display_prefs);
+        if prefs == self.display {
+            return;
+        }
+        self.display = prefs;
+        apply_motion(ctx, prefs.reduce_motion);
+        for host in self.engines.values() {
+            apply_motion(host.context(), prefs.reduce_motion);
+        }
+        // Re-apply the palette (with or without more contrast).
+        self.dark = None;
+    }
+
+    /// The display settings to use instead of the system's (`--check`).
+    pub fn override_display(&mut self, prefs: Option<craftworks_platform::display::DisplayPrefs>) {
+        self.display_override = prefs;
+        self.display_read = 0.0;
+    }
+
+    /// The chrome's text size (percent).
+    pub fn set_text_scale(&mut self, ctx: &egui::Context, percent: u32) {
+        tokens::text::set_scale(percent);
+        tokens::apply(ctx, &self.palette);
     }
 
     pub fn engine_ref(&self, kind: Kind) -> Option<&EngineHost> {
@@ -829,6 +890,9 @@ impl App {
         }
         self.dark = Some(dark);
         self.palette = Palette::for_dark(dark);
+        if self.display.increase_contrast {
+            self.palette = self.palette.with_contrast();
+        }
         tokens::apply(ctx, &self.palette);
         for host in self.engines.values_mut() {
             host.editor_mut().set_dark(dark);
@@ -1237,6 +1301,7 @@ impl eframe::App for App {
             self.titlebar = t;
             self.titlebar_measured = true;
         }
+        self.sync_display(&ctx);
         self.sync_appearance(&ctx);
         self.menu_frame(&ctx);
         self.shortcuts();
@@ -1351,7 +1416,15 @@ impl eframe::App for App {
                 self.on_review(a);
             }
         }
-        let _ = self.toasts.show(&ctx, &p, self.content_rect);
+        if let Some(clicked) = self.toasts.show(&ctx, &p, self.content_rect)
+            && let Some((id, report)) = self.crash_toast.take()
+        {
+            if clicked == id {
+                craftworks_platform::files::reveal(&report);
+            } else {
+                self.crash_toast = Some((id, report));
+            }
+        }
         if self.check.is_some()
             && let Some(d) = self.a11y.lock().ok().and_then(|s| s.window_repaint_delay)
         {
@@ -1447,6 +1520,12 @@ fn percent_decode(s: &str) -> String {
 
 fn file_name(p: &Path) -> String {
     p.file_name().map_or_else(|| p.display().to_string(), |n| n.to_string_lossy().to_string())
+}
+
+/// Animations on or off in one egui context (Reduce motion). The chrome reads a zero
+/// animation time as "reduce motion"; the apps' own animations follow egui's time too.
+fn apply_motion(ctx: &egui::Context, reduce: bool) {
+    ctx.all_styles_mut(|s| s.animation_time = if reduce { 0.0 } else { 1.0 / 12.0 });
 }
 
 #[cfg(test)]

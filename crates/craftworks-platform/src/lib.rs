@@ -7,7 +7,9 @@
 //! `--check`); [`editor`] makes an engine with its services filled in.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+pub mod activity;
 pub mod clipboard;
+pub mod display;
 pub mod files;
 pub mod print;
 mod services;

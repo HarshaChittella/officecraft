@@ -17,6 +17,7 @@
 mod ai;
 mod app;
 mod check;
+mod crash;
 mod logger;
 mod menu;
 mod projects;
@@ -28,6 +29,7 @@ use std::path::PathBuf;
 
 fn main() -> eframe::Result {
     logger::install();
+    crash::install();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(String::as_str) {
         Some("mcp") => std::process::exit(mcp(&args[1..])),
@@ -49,9 +51,12 @@ fn main() -> eframe::Result {
             _ => files.push(PathBuf::from(a)),
         }
     }
+    // A check run waits and measures in real time: no App Nap while it lasts.
+    let _awake = check_dir.as_ref().map(|_| craftworks_platform::activity::begin("Craftworks acceptance check"));
     if let Some(dir) = &check_dir {
         // A check run keeps its settings (recent files, session) to itself.
         settings::use_dir(dir.join("settings"));
+        crash::use_dir(dir.join("logs"));
     } else if let Some(dir) = std::env::var_os("CRAFTWORKS_SETTINGS_DIR") {
         // Tests of the app bundle (scripts/finder-open-test.sh) keep yours untouched.
         settings::use_dir(PathBuf::from(dir));
@@ -93,6 +98,7 @@ fn main() -> eframe::Result {
                 apple_inbox.set_wake(move || ctx.request_repaint());
                 app.set_apple_events(apple_inbox.clone());
             }
+            app.mention_crash();
             match check_dir {
                 Some(dir) => app = app.with_check(check::Check::new(dir, forced_dark)),
                 None if files.is_empty() => {

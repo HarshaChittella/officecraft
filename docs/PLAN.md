@@ -365,6 +365,31 @@ Done when: with only this server connected, Claude Code completes the three brie
 
 Done when: a signed, notarised `.dmg` installs and runs on a clean Mac of each architecture.
 
+**Progress (2026-11-16): everything that doesn't need your Apple account or other Macs is done.** The checklist is in `docs/phase8-checks.md`.
+- **8.1:** the accessibility graft is checked on every run (D28). The VoiceOver pass is listed as hand checks.
+- **8.2** (D46):
+  - Reduce motion and Increase contrast follow System Settings, read through AppKit's safe calls. Reduce motion stops animation in the chrome and in every app; Increase contrast switches to a palette whose muted text is ≥ 7:1.
+  - View ▸ Interface Text Size (Default, Large, Larger) scales the chrome's text and is kept in `prefs.json`. Reading macOS's own preferred text size needs `unsafe` AppKit calls, so this is an app setting.
+  - All three are covered by `--check`.
+- **8.3:**
+  - Crash reports in `~/Library/Logs/Craftworks`: the panic, thread, backtrace and recent log lines. The next launch offers to show the report. Nothing is sent anywhere.
+  - `packaging/macos/sign.sh`: hardened runtime with no exceptions, secure timestamp, and notarise and staple when given a profile. Without a Developer ID it signs ad hoc for this Mac.
+  - Updates (craft-update) wait for a decision on where releases are published.
+- **8.4:** `scripts/licences.py` writes `docs/licences.md` from `cargo metadata`: 935 crates, all on the allowlist, 16 MPL-2.0 (symphonia, listed). `bundle.sh` runs it, failing the build on anything else, and copies the report and each Craft repo's attribution files into the app's Resources/Licenses.
+- **8.5:** `packaging/macos/dmg.sh` makes `build/Craftworks-<version>-<arch>.dmg`. The ad-hoc, hardened app inside it passes the full `--check`.
+- **The `--check` run itself:**
+  - It holds a user-initiated activity, so App Nap doesn't stall it in the background.
+  - It stops waiting for a screenshot after 10 s, with a warning.
+  - It forces the accessibility settings off, so they don't affect its results.
+- **Fixed** (reported by the owner): a new, empty sheet's tab wouldn't close. GridCraft's own blank Book1 took its place as a new tab; WordCraft had the same with Document1. The blank document an app keeps for itself is now set aside (`engines/blanks.rs`).
+- **Left (yours):**
+  - A Developer ID and notary profile.
+  - The x86_64 Rust target, for the Intel or universal build.
+  - Where releases are published (updates).
+  - The clean-Mac tests.
+  - The VoiceOver pass.
+  - A licence for Craftworks itself: Cargo.toml says MIT OR Apache-2.0, but the repo has no LICENSE files.
+
 ---
 
 ## Risks

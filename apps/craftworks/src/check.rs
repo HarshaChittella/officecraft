@@ -44,6 +44,8 @@ enum Stage {
     Projects { phase: u8 },
     Ai { phase: u8 },
     BlankClose { phase: u8 },
+    Display { phase: u8 },
+    Crash { phase: u8 },
     Resize { i: usize, frames: u32 },
     Accessibility { frames: u32 },
     Menus { phase: u8 },
@@ -720,7 +722,8 @@ impl Check {
                     3 => {
                         app.projects.query = "launch".into();
                         app.projects.frame();
-                        if app.projects.hits.is_empty() && self.still_waiting(ctx, 20.0) {
+                        // A rescan (2 s) and re-reading the changed files: slower on a busy Mac.
+                        if app.projects.hits.is_empty() && self.still_waiting(ctx, 60.0) {
                             return;
                         }
                         self.done_waiting();
@@ -1076,12 +1079,92 @@ impl Check {
                             ),
                         );
                         self.tries = 0;
-                        self.stage = Stage::DirtyClose { phase: 0 };
+                        self.stage = Stage::Display { phase: 0 };
                         self.wait = 5;
                         return;
                     }
                 }
                 self.stage = Stage::BlankClose { phase: phase + 1 };
+            }
+            // Phase 8.2: Reduce motion, Increase contrast and the chrome's text size.
+            Stage::Display { phase } => {
+                use craftworks_platform::display::DisplayPrefs;
+                match phase {
+                    0 => {
+                        app.override_display(Some(DisplayPrefs { reduce_motion: true, increase_contrast: true }));
+                        app.set_text_scale(ctx, 130);
+                        if let Some((tab, _)) = Self::tab_of(app, Kind::Document) {
+                            app.tabs.activate(tab);
+                        }
+                        self.wait = 10;
+                    }
+                    1 => {
+                        let window_still = ctx.global_style().animation_time == 0.0;
+                        let engines_still =
+                            Kind::ALL.iter().filter_map(|k| app.engine_ref(*k)).all(|h| h.context().global_style().animation_time == 0.0);
+                        self.check(window_still && engines_still, "Reduce motion stops animation in the chrome and in every app");
+                        let expected = craftworks_shell::Palette::for_dark(app.is_dark()).with_contrast();
+                        self.check(app.palette == expected, "Increase contrast gives the chrome its higher-contrast colours");
+                        self.check(
+                            (craftworks_shell::tokens::text::body().size - 13.0 * 1.3).abs() < 0.01,
+                            "View ▸ Interface Text Size ▸ Larger makes the chrome's text larger",
+                        );
+                        app.sidebar.open = true;
+                        self.wait = 6;
+                    }
+                    2 => {
+                        if self.still_waiting(ctx, 0.5) {
+                            return;
+                        }
+                        self.done_waiting();
+                        self.screenshot(ctx, "display-contrast-large-text");
+                        self.wait = 6;
+                    }
+                    _ => {
+                        app.override_display(Some(DisplayPrefs::default()));
+                        app.set_text_scale(ctx, 100);
+                        app.sidebar.open = false;
+                        self.stage = Stage::Crash { phase: 0 };
+                        self.wait = 8;
+                        return;
+                    }
+                }
+                self.stage = Stage::Display { phase: phase + 1 };
+            }
+            // Phase 8.3: a panic leaves a crash report (a background thread's, so the run goes on).
+            Stage::Crash { phase } => {
+                let logs = self.dir.join("logs");
+                if phase == 0 {
+                    let _ = std::thread::Builder::new().name("check-deliberate-panic".into()).spawn(|| {
+                        #[allow(clippy::panic)]
+                        {
+                            panic!("deliberate panic from the acceptance check");
+                        }
+                    });
+                    self.stage = Stage::Crash { phase: 1 };
+                    self.wait = 10;
+                    return;
+                }
+                let report = std::fs::read_dir(&logs)
+                    .ok()
+                    .into_iter()
+                    .flatten()
+                    .flatten()
+                    .map(|e| e.path())
+                    .find(|p| p.extension().is_some_and(|x| x == "log"))
+                    .and_then(|p| std::fs::read_to_string(p).ok())
+                    .unwrap_or_default();
+                if report.is_empty() && self.still_waiting(ctx, 10.0) {
+                    return;
+                }
+                self.done_waiting();
+                self.check(
+                    report.contains("deliberate panic from the acceptance check")
+                        && report.contains("Backtrace:")
+                        && report.contains("check-deliberate-panic"),
+                    "a panic writes a crash report (message, thread, backtrace, recent log lines)",
+                );
+                self.stage = Stage::DirtyClose { phase: 0 };
             }
             Stage::Resize { i, frames } => {
                 let Some(size) = SIZES.get(i).copied() else {

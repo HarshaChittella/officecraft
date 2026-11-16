@@ -78,6 +78,16 @@ impl Palette {
         }
     }
 
+    /// For Increase contrast: firmer hairlines and hover fills, and secondary text closer to
+    /// the primary text.
+    pub fn with_contrast(self) -> Palette {
+        if self.dark {
+            Palette { hairline: Color32::from_white_alpha(0x55), text_muted: rgb(0xD6D6DD), surface_hover: rgb(0x3A3A40), ..self }
+        } else {
+            Palette { hairline: Color32::from_black_alpha(0x4D), text_muted: rgb(0x3F3F46), surface_hover: rgb(0xDCDCE2), ..self }
+        }
+    }
+
     /// Tab group colour `i` (wrapping), and the colour of a label written on it.
     pub fn group(&self, i: u8) -> (Color32, Color32) {
         let (fill, light_text) = GROUP_COLORS[usize::from(i) % GROUP_COLORS.len()];
@@ -147,24 +157,44 @@ pub mod motion {
 /// The chrome's text styles.
 pub mod text {
     use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// The chrome's text size, in percent (View ▸ Interface Text Size).
+    static SCALE: AtomicU32 = AtomicU32::new(100);
+
+    /// The text sizes the View menu offers: Default, Large, Larger.
+    pub const SCALES: [(u32, &str); 3] = [(100, "Default"), (115, "Large"), (130, "Larger")];
+
+    /// Sets the chrome's text size (percent; kept between 80 and 160).
+    pub fn set_scale(percent: u32) {
+        SCALE.store(percent.clamp(80, 160), Ordering::Relaxed);
+    }
+
+    pub fn scale() -> u32 {
+        SCALE.load(Ordering::Relaxed)
+    }
+
+    fn sized(pt: f32) -> f32 {
+        pt * scale() as f32 / 100.0
+    }
 
     pub fn tab() -> FontId {
-        FontId::new(12.5, FontFamily::Proportional)
+        FontId::new(sized(12.5), FontFamily::Proportional)
     }
     pub fn body() -> FontId {
-        FontId::new(13.0, FontFamily::Proportional)
+        FontId::new(sized(13.0), FontFamily::Proportional)
     }
     pub fn meta() -> FontId {
-        FontId::new(11.5, FontFamily::Proportional)
+        FontId::new(sized(11.5), FontFamily::Proportional)
     }
     pub fn section() -> FontId {
-        FontId::new(12.0, FontFamily::Name(SEMIBOLD.into()))
+        FontId::new(sized(12.0), FontFamily::Name(SEMIBOLD.into()))
     }
     pub fn title() -> FontId {
-        FontId::new(22.0, FontFamily::Name(SEMIBOLD.into()))
+        FontId::new(sized(22.0), FontFamily::Name(SEMIBOLD.into()))
     }
     pub fn card() -> FontId {
-        FontId::new(13.0, FontFamily::Name(SEMIBOLD.into()))
+        FontId::new(sized(13.0), FontFamily::Name(SEMIBOLD.into()))
     }
 }
 
@@ -250,6 +280,27 @@ mod tests {
     fn contrast(a: Color32, b: Color32) -> f32 {
         let (x, y) = (luminance(a), luminance(b));
         (x.max(y) + 0.05) / (x.min(y) + 0.05)
+    }
+
+    #[test]
+    fn increased_contrast_is_at_least_as_readable() {
+        for p in [Palette::LIGHT, Palette::DARK] {
+            let c = p.with_contrast();
+            for bg in [c.surface, c.surface_raised, c.surface_hover] {
+                assert!(contrast(c.text_muted, bg) >= 7.0, "muted text in increased contrast (dark={}): {:.2}", p.dark, contrast(c.text_muted, bg));
+                assert!(contrast(c.text_muted, bg) >= contrast(p.text_muted, bg) - 0.01);
+            }
+        }
+    }
+
+    #[test]
+    fn text_sizes_scale_and_stay_in_range() {
+        text::set_scale(130);
+        assert!((text::body().size - 13.0 * 1.3).abs() < 0.01);
+        text::set_scale(500);
+        assert_eq!(text::scale(), 160);
+        text::set_scale(100);
+        assert!((text::body().size - 13.0).abs() < 0.01);
     }
 
     #[test]
