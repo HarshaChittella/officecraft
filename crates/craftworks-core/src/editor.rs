@@ -102,6 +102,12 @@ pub trait Editor {
     /// A new, empty document, made active.
     fn new_document(&mut self) -> Result<DocId>;
 
+    /// Shows the app's own New page (blank and its templates) over the document in front, as
+    /// File ▸ New does. An app without one says so.
+    fn show_new_page(&mut self) -> Result<()> {
+        Err("This app has no New page.".into())
+    }
+
     /// Opens `path` as a new document, made active. Opening a file already open shows that one.
     fn open(&mut self, path: &Path) -> Result<Opened>;
 

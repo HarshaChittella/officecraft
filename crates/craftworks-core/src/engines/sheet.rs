@@ -107,6 +107,11 @@ impl Editor for SheetEditor {
         self.after_open(&reply)
     }
 
+    fn show_new_page(&mut self) -> Result<()> {
+        self.app.open_backstage(gridcraft_ui_egui::backstage::Page::New);
+        Ok(())
+    }
+
     fn open(&mut self, path: &Path) -> Result<Opened> {
         self.blanks.note_startup(&self.seen());
         let reply = self.app.run("file.open", json!({"path": path_str(path)?}))?;

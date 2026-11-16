@@ -10,7 +10,8 @@ profile="${1:-measure}"
 # No licence outside the allowlist gets into a build (docs/licences.md, Phase 8.4).
 python3 scripts/licences.py
 cargo build -p craftworks --profile "$profile"
-app=build/Craftworks.app
+# CRAFTWORKS_APP builds the bundle somewhere else (say, while build/Craftworks.app is running).
+app="${CRAFTWORKS_APP:-build/Craftworks.app}"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp "target/$profile/craftworks" "$app/Contents/MacOS/craftworks"

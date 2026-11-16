@@ -1,7 +1,8 @@
 //! Short, non-blocking notices at the bottom centre of the window (docs/design.md "Toasts").
 
-use crate::tokens::{Palette, motion, radius, text};
-use egui::{CornerRadius, Id, Rect, Stroke, pos2, vec2};
+use crate::tokens::{Palette, motion, size, space, text};
+use crate::{icons, widgets};
+use egui::{Id, Rect, pos2, vec2};
 
 /// How long a toast stays (unless hovered), in seconds.
 pub const SHOW_FOR: f64 = 4.0;
@@ -59,46 +60,45 @@ impl Toasts {
     /// button was clicked.
     pub fn show(&mut self, ctx: &egui::Context, p: &Palette, area: Rect) -> Option<u64> {
         let now = ctx.input(|i| i.time);
-        let reduce = ctx.global_style().animation_time <= 0.0;
         let mut clicked = None;
-        let mut y = area.bottom() - 20.0;
+        let mut y = area.bottom() - space::XL;
         let mut keep = Vec::new();
         for mut t in std::mem::take(&mut self.list).into_iter().rev() {
             let since = now - *t.shown_at.get_or_insert(now);
             let id = Id::unique(("cw_toast", t.id));
-            let rise = ctx.animate_bool_with_time(id, since < SHOW_FOR, motion::dur(motion::MOVE, reduce));
+            let rise = motion::fade(ctx, id, since < SHOW_FOR, motion::MOVE);
+            // Toasts above an expiring one glide down into its place.
+            let y_now = motion::glide(ctx, id.with("y"), y, motion::MOVE);
             let resp = egui::Area::new(id)
                 .order(egui::Order::Tooltip)
                 .pivot(egui::Align2::CENTER_BOTTOM)
-                .fixed_pos(pos2(area.center().x, y + (1.0 - rise) * 12.0))
+                .fixed_pos(pos2(area.center().x, y_now + (1.0 - rise) * 14.0))
                 .show(ctx, |ui| {
                     ui.set_opacity(rise);
-                    egui::Frame::NONE
-                        .fill(p.surface_raised)
-                        .stroke(Stroke::new(1.0, p.hairline))
-                        .corner_radius(CornerRadius::same(radius::POPOVER))
-                        .shadow(egui::Shadow { offset: [0, 4], blur: 16, spread: 0, color: p.shadow })
-                        .inner_margin(egui::Margin::symmetric(14, 10))
-                        .show(ui, |ui| {
-                            ui.horizontal(|ui| {
-                                if t.error {
-                                    let (r, _) = ui.allocate_exact_size(vec2(8.0, 8.0), egui::Sense::hover());
-                                    ui.painter().circle_filled(r.center(), 4.0, p.danger);
-                                }
-                                ui.label(egui::RichText::new(&t.text).font(text::body()).color(p.text));
-                                if let Some(a) = &t.action
-                                    && ui.link(a).clicked()
-                                {
+                    widgets::panel_frame(p).inner_margin(egui::Margin { left: 12, right: 14, top: 9, bottom: 9 }).show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = space::S;
+                            let (r, _) = ui.allocate_exact_size(vec2(size::ICON, size::ICON), egui::Sense::hover());
+                            if t.error {
+                                icons::alert(ui.painter(), r, p.danger);
+                            } else {
+                                icons::check_circle(ui.painter(), r, p.success);
+                            }
+                            ui.label(egui::RichText::new(&t.text).font(text::body()).color(p.text));
+                            if let Some(a) = &t.action {
+                                ui.add_space(space::XS);
+                                if ui.link(egui::RichText::new(a).font(text::card()).color(p.accent)).clicked() {
                                     clicked = Some(t.id);
                                 }
-                            });
+                            }
                         });
+                    });
                 });
             let hovered = resp.response.contains_pointer();
             if hovered {
                 t.shown_at = Some(now - 1.0);
             }
-            y = resp.response.rect.top() - 8.0;
+            y -= resp.response.rect.height() + space::S;
             if since < SHOW_FOR + f64::from(motion::MOVE) || hovered {
                 keep.push(t);
             }

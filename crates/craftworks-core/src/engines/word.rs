@@ -95,6 +95,13 @@ impl Editor for WordEditor {
         Ok(self.active_id())
     }
 
+    fn show_new_page(&mut self) -> Result<()> {
+        // File ▸ New: WordCraft's template gallery.
+        self.app.ui.backstage = true;
+        self.app.ui.backstage_page = "new".into();
+        Ok(())
+    }
+
     fn open(&mut self, path: &Path) -> Result<Opened> {
         self.blanks.note_startup(&self.seen());
         self.app.open_file(path_str(path)?, None)?;

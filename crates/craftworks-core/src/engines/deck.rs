@@ -77,6 +77,11 @@ impl Editor for DeckEditor {
         self.active_or_err()
     }
 
+    fn show_new_page(&mut self) -> Result<()> {
+        self.app.open_backstage(deckcraft_ui_egui::backstage::Page::New);
+        Ok(())
+    }
+
     fn open(&mut self, path: &Path) -> Result<Opened> {
         self.app.open_path(path_str(path)?)?;
         self.active_or_err().map(Opened::Now)

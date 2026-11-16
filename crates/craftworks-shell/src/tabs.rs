@@ -4,8 +4,8 @@
 //! before each group's tabs, a line of its colour under them, and a click on the label to
 //! collapse it. It reports what the user did as [`TabAction`]s; the app acts on them.
 
-use crate::icons;
 use crate::tokens::{GROUP_NAMES, Palette, motion, radius, size, text};
+use crate::{icons, widgets};
 use craftworks_core::Kind;
 use egui::{Color32, CornerRadius, Id, Rect, Sense, Stroke, Ui, pos2, vec2};
 use std::path::PathBuf;
@@ -47,6 +47,8 @@ pub enum TabAction {
         to: usize,
     },
     NewTab,
+    /// A blank file of this kind straight away (the "+" button's long-press menu).
+    NewBlank(Kind),
     Drop {
         at: usize,
         paths: Vec<PathBuf>,
@@ -63,10 +65,23 @@ pub enum TabAction {
         id: u64,
         color: u8,
     },
+    /// Put the tab's file in a project: the one at `root`, or a new one the user is asked
+    /// for (`None`).
+    AddToProject {
+        id: u64,
+        root: Option<PathBuf>,
+    },
     /// Show the group's project in the sidebar.
     ShowGroup(u64),
     /// Close the group's tabs and its project.
     CloseGroup(u64),
+}
+
+/// A project a tab can be added to, as its menu lists it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ProjectChoice {
+    pub name: String,
+    pub root: PathBuf,
 }
 
 /// What the strip remembers between frames.
@@ -80,6 +95,18 @@ pub struct TabStripState {
     pub plus_rect: Option<Rect>,
     /// A group being renamed from its menu, and the name typed so far.
     renaming: Option<(u64, String)>,
+    /// When the pointer went down on "+", while it is still held there.
+    plus_held_since: Option<f64>,
+    /// The quick menu under "+" is showing (a long press, or a right-click).
+    plus_menu: bool,
+    /// The menu came up under a held pointer: letting go must not close it again.
+    plus_menu_fresh: bool,
+    /// The projects a tab's menu offers under "Add to Project" (the app keeps this current).
+    pub projects: Vec<ProjectChoice>,
+    /// When each tab first showed (seconds of egui time), for its entrance.
+    born: std::collections::HashMap<u64, f64>,
+    /// The strip has drawn once: tabs that arrive from now on animate in.
+    primed: bool,
 }
 
 /// Lays `n` tabs into `avail` points: their width, and whether they overflow (then scroll).
@@ -178,12 +205,20 @@ pub fn tab_strip(
     let mut actions = Vec::new();
     let ctx = ui.ctx().clone();
     // Tabs fill the row less a small margin (the row is sized around the traffic lights).
-    let th = (rect.height() - 6.0).clamp(22.0, size::TAB_HEIGHT);
-    let reduce = ctx.global_style().animation_time <= 0.0;
-    let plus_w = th;
+    // Tabs stand on the row's bottom edge, so the active one runs into the app below it.
+    let th = (rect.height() - 5.0).max(22.0);
+    let now = ctx.input(|i| i.time);
+    // Tabs already there when the strip first draws (a restored session) don't make an entrance.
+    let primed = st.primed;
+    st.born.retain(|id, _| items.iter().any(|t| t.id == *id));
+    for t in items {
+        st.born.entry(t.id).or_insert(if primed { now } else { now - 60.0 });
+    }
+    st.primed = true;
+    let plus_w = 26.0;
     let avail = (rect.width() - plus_w - 8.0).max(0.0);
     let font = text::tab();
-    let label_font = egui::FontId::new(12.0, egui::FontFamily::Name(crate::tokens::SEMIBOLD.into()));
+    let label_font = egui::FontId::new(text::meta().size, egui::FontFamily::Name(crate::tokens::SEMIBOLD.into()));
 
     // Label widths, then the tabs share what's left.
     let counts: Vec<usize> = groups.iter().map(|g| items.iter().filter(|t| t.group == Some(g.id)).count()).collect();
@@ -192,7 +227,7 @@ pub fn tab_strip(
         .zip(&counts)
         .map(|(g, n)| {
             let w = ui.fonts_mut(|f| f.layout_no_wrap(label_text(g, *n), label_font.clone(), Color32::WHITE).size().x);
-            (w + 20.0).clamp(28.0, 180.0)
+            (w + 22.0).clamp(28.0, 180.0)
         })
         .collect();
     let base: Vec<usize> = (0..items.len()).collect();
@@ -276,9 +311,8 @@ pub fn tab_strip(
     }
     let cur_slots = slots(items, groups, &order);
     let cur_lefts = lefts(&cur_slots);
-    let y = rect.center().y - th / 2.0;
+    let y = rect.bottom() - th;
     let painter = ui.painter().with_clip_rect(tabs_area);
-    let dur = motion::dur(motion::MOVE, reduce);
 
     // Each group's span (first label left, last tab right), for its underline.
     let mut spans: Vec<Option<(f32, f32)>> = vec![None; groups.len()];
@@ -288,8 +322,8 @@ pub fn tab_strip(
         match *slot {
             Slot::Label(gi) => {
                 let g = &groups[gi];
-                let x = ctx.animate_value_with_time(Id::unique(("cw_group_x", g.id)), target_x, dur);
-                let r = Rect::from_min_size(pos2(x, y + 3.0), vec2(label_w[gi], th - 6.0));
+                let x = motion::glide(&ctx, Id::unique(("cw_group_x", g.id)), target_x, motion::MOVE);
+                let r = Rect::from_min_size(pos2(x, y + 3.0), vec2(label_w[gi], th - 8.0));
                 spans[gi] = Some((r.left(), r.right()));
                 let visible = r.intersect(tabs_area);
                 if visible.width() <= 0.0 {
@@ -297,11 +331,15 @@ pub fn tab_strip(
                 }
                 let resp = ui.interact(visible, Id::unique(("cw_group", g.id)), Sense::click());
                 let (fill, ink) = p.group(g.color);
-                let fill = if resp.hovered() { Palette::tint(fill, 0.85) } else { fill };
-                painter.rect_filled(r, CornerRadius::same(radius::CONTROL), fill);
+                let (h, down) = widgets::hover(ui, &resp);
+                let fill = Palette::mix(fill, ink, 0.10 * h + if down { 0.08 } else { 0.0 });
+                painter.rect_filled(r, CornerRadius::same(255), fill);
+                if resp.has_focus() {
+                    widgets::focus_ring(&painter, r, 10, p);
+                }
                 let galley = ui.fonts_mut(|f| {
                     let mut job = egui::text::LayoutJob::simple_singleline(label_text(g, counts[gi]), label_font.clone(), ink);
-                    job.wrap = egui::text::TextWrapping::truncate_at_width(r.width() - 12.0);
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(r.width() - 14.0);
                     f.layout_job(job)
                 });
                 painter.galley(pos2(r.center().x - galley.size().x / 2.0, r.center().y - galley.size().y / 2.0), galley, ink);
@@ -320,7 +358,7 @@ pub fn tab_strip(
                 let is_dragged = drag_target.is_some_and(|(id, _, _)| id == tab.id);
                 let x = match drag_target {
                     Some((id, _, px)) if id == tab.id => px.clamp(rect.left() - w / 2.0, rect.left() + avail - w / 2.0),
-                    _ => ctx.animate_value_with_time(Id::unique(("cw_tab_x", tab.id)), target_x, dur),
+                    _ => motion::glide(&ctx, Id::unique(("cw_tab_x", tab.id)), target_x, motion::MOVE),
                 };
                 let r = Rect::from_min_size(pos2(x, y), vec2(w, th));
                 if let Some(gi) = tab.group.and_then(|g| groups.iter().position(|x| x.id == g))
@@ -329,7 +367,10 @@ pub fn tab_strip(
                     let s = spans[gi].get_or_insert((r.left(), r.right()));
                     s.1 = s.1.max(r.right());
                 }
-                draw_tab(ui, &painter, p, tab, r, tabs_area, active, is_dragged, pointer, drag_target, items, st, &mut actions, reduce, &font);
+                // A hairline parts two resting tabs; it steps aside for the active one.
+                let next_active = matches!(cur_slots.get(k + 1), Some(Slot::Tab(j)) if Some(items[*j].id) == active);
+                let sep = !is_dragged && !next_active && matches!(cur_slots.get(k + 1), Some(Slot::Tab(_)));
+                draw_tab(ui, &painter, p, tab, r, tabs_area, active, is_dragged, sep, pointer, drag_target, items, st, &mut actions, &font);
             }
         }
     }
@@ -340,29 +381,33 @@ pub fn tab_strip(
             && counts[gi] > 0
         {
             let (fill, _) = p.group(groups[gi].color);
-            painter.line_segment([pos2(*l + 2.0, y + th + 1.5), pos2(*r - 2.0, y + th + 1.5)], Stroke::new(2.0, fill));
+            let line = Rect::from_min_max(pos2(*l + 3.0, rect.bottom() - 2.0), pos2(*r - 3.0, rect.bottom()));
+            painter.rect_filled(line, CornerRadius::same(1), fill);
         }
     }
     if st.dragging.is_some() && !ctx.input(|i| i.pointer.any_down()) {
         st.dragging = None;
     }
 
-    // Edge fades while scrolled.
+    // Edge fades while scrolled: the strip dissolves into the title row, eased in as it scrolls.
     if overflow {
-        let fade = |left: bool| {
-            for k in 0..8 {
-                let a = 1.0 - k as f32 / 8.0;
-                let step = size::EDGE_FADE / 8.0;
-                let x = if left { tabs_area.left() + k as f32 * step } else { tabs_area.right() - (k + 1) as f32 * step };
-                ui.painter().rect_filled(Rect::from_min_size(pos2(x, rect.top()), vec2(step, rect.height())), 0.0, Palette::tint(p.surface, a));
+        let fade = |left: bool, strength: f32| {
+            if strength <= 0.0 {
+                return;
             }
+            let (solid, clear) = (Palette::tint(p.band, strength), Palette::tint(p.band, 0.0));
+            let (x0, x1) = if left { (tabs_area.left(), tabs_area.left() + size::EDGE_FADE) } else { (tabs_area.right(), tabs_area.right() - size::EDGE_FADE) };
+            let mut mesh = egui::Mesh::default();
+            mesh.colored_vertex(pos2(x0, rect.top()), solid);
+            mesh.colored_vertex(pos2(x1, rect.top()), clear);
+            mesh.colored_vertex(pos2(x1, rect.bottom() - 1.0), clear);
+            mesh.colored_vertex(pos2(x0, rect.bottom() - 1.0), solid);
+            mesh.add_triangle(0, 1, 2);
+            mesh.add_triangle(0, 2, 3);
+            ui.painter().add(mesh);
         };
-        if st.scroll > 0.5 {
-            fade(true);
-        }
-        if st.scroll < max_scroll - 0.5 {
-            fade(false);
-        }
+        fade(true, (st.scroll / size::EDGE_FADE).clamp(0.0, 1.0));
+        fade(false, ((max_scroll - st.scroll) / size::EDGE_FADE).clamp(0.0, 1.0));
     }
 
     // Files dragged from Finder: a caret where they'll land, and a drop opens them there.
@@ -373,26 +418,111 @@ pub fn tab_strip(
     if hovering_files && over {
         let x = shown_tabs.iter().find(|(i, _)| *i >= at).map_or(total, |(_, c)| c - w / 2.0);
         let x = rect.left() + x - st.scroll - size::TAB_GAP / 2.0;
-        ui.painter().line_segment([pos2(x, y + 4.0), pos2(x, y + th - 4.0)], Stroke::new(2.0, p.accent));
+        ui.painter().rect_filled(Rect::from_min_max(pos2(x - 1.0, y + 3.0), pos2(x + 1.0, y + th - 3.0)), CornerRadius::same(1), p.accent);
     }
     if !dropped.is_empty() && over {
         actions.push(TabAction::Drop { at, paths: dropped });
     }
 
     // "+" after the last tab (pinned at the end while the strip scrolls).
-    let plus_x = (rect.left() + total - st.scroll).clamp(rect.left(), rect.left() + avail) + 4.0;
-    let plus = Rect::from_min_size(pos2(plus_x, y), vec2(plus_w, th));
-    let pr = ui.interact(plus, Id::unique("cw_plus"), Sense::click()).on_hover_text("New tab (⌘T)");
-    if pr.hovered() {
-        ui.painter().rect_filled(plus, CornerRadius::same(radius::TAB), p.surface_hover);
+    let plus_x = motion::glide(&ctx, Id::unique("cw_plus_x"), (rect.left() + total - st.scroll).clamp(rect.left(), rect.left() + avail) + 4.0, motion::MOVE);
+    let plus = Rect::from_center_size(pos2(plus_x + plus_w / 2.0 + 2.0, y + th / 2.0 - 1.0), vec2(plus_w, plus_w));
+    let pr = widgets::icon_button(ui, p, plus, Id::unique("cw_plus"), "New tab", st.plus_menu, icons::plus);
+    // A click opens the new tab. Holding "+" (or right-clicking it) drops a quick menu of
+    // blank files instead, as a browser's toolbar buttons do.
+    if pr.is_pointer_button_down_on() && ctx.input(|i| i.pointer.primary_down()) {
+        let since = *st.plus_held_since.get_or_insert(now);
+        if now - since >= LONG_PRESS && !st.plus_menu {
+            st.plus_menu = true;
+            st.plus_menu_fresh = true;
+        } else if !st.plus_menu {
+            ctx.request_repaint();
+        }
+    } else {
+        st.plus_held_since = None;
     }
-    icons::plus(ui.painter(), plus.shrink(6.0), if pr.hovered() { p.text } else { p.text_muted });
-    pr.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "New tab"));
-    if pr.clicked() {
+    if pr.secondary_clicked() {
+        st.plus_menu = true;
+    }
+    if pr.clicked() && !st.plus_menu {
         actions.push(TabAction::NewTab);
+    }
+    if st.plus_menu {
+        let mut open = true;
+        let mut chosen = None;
+        egui::Popup::from_response(&pr).open_bool(&mut open).gap(6.0).show(|ui| {
+            ui.set_min_width(210.0);
+            ui.spacing_mut().item_spacing.y = 2.0;
+            for (kind, label) in QUICK_NEW {
+                if quick_row(ui, p, kind, label).clicked() {
+                    chosen = Some(kind);
+                }
+            }
+        });
+        // Letting go of the press that opened the menu counts as a click outside it: keep it.
+        let released = ctx.input(|i| i.pointer.any_released());
+        if st.plus_menu_fresh && (released || !open) {
+            open = true;
+            st.plus_menu_fresh = !released;
+        }
+        if let Some(kind) = chosen {
+            actions.push(TabAction::NewBlank(kind));
+            open = false;
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
+            open = false;
+        }
+        st.plus_menu = open;
+        if !open {
+            st.plus_menu_fresh = false;
+        }
+    } else if !pr.is_pointer_button_down_on() {
+        let _ = pr.clone().on_hover_text("New tab (⌘T)\nHold for a blank document, sheet, presentation or PDF");
     }
     st.plus_rect = Some(plus);
     actions
+}
+
+/// How long "+" is held before its quick menu drops, in seconds.
+pub const LONG_PRESS: f64 = 0.4;
+
+/// The quick menu under "+": a blank file of each kind.
+const QUICK_NEW: [(Kind, &str); 4] =
+    [(Kind::Document, "New Document"), (Kind::Sheet, "New Sheet"), (Kind::Presentation, "New Presentation"), (Kind::Pdf, "New PDF")];
+
+/// One line of the quick menu: the kind's glass icon and its name.
+fn quick_row(ui: &mut Ui, p: &Palette, kind: Kind, label: &str) -> egui::Response {
+    let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width().max(210.0), 32.0), Sense::click());
+    widgets::hover_fill(ui, ui.painter(), p, rect, radius::CONTROL, &resp);
+    icons::kind(ui.painter(), Rect::from_center_size(pos2(rect.left() + 18.0, rect.center().y), vec2(20.0, 20.0)), kind, Color32::WHITE);
+    ui.painter().text(pos2(rect.left() + 38.0, rect.center().y), egui::Align2::LEFT_CENTER, label, text::body(), p.text);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label));
+    resp
+}
+
+/// The Home tab, pinned before the others: the app's mark. It looks and behaves as a tab does
+/// (chosen, it is a piece of the page below), and it never closes.
+pub fn home_tab(ui: &mut Ui, p: &Palette, r: Rect, selected: bool) -> egui::Response {
+    let resp = ui.interact(r, Id::unique("cw_home_tab"), Sense::click());
+    let (h, _) = widgets::hover(ui, &resp);
+    let sel = motion::fade(ui.ctx(), Id::unique("cw_home_tab_sel"), selected, motion::PANEL);
+    let painter = ui.painter();
+    let top = CornerRadius { nw: radius::TAB, ne: radius::TAB, sw: 0, se: 0 };
+    if h > 0.0 && sel < 1.0 {
+        let pill = Rect::from_min_max(pos2(r.left() + 3.0, r.top() + 1.0), pos2(r.right() - 3.0, r.bottom() - 4.0));
+        painter.rect_filled(pill, CornerRadius::same(radius::CONTROL), Palette::tint(Palette::mix(p.band, p.surface, 0.6), h * (1.0 - sel)));
+    }
+    if sel > 0.0 {
+        painter.rect_filled(r, top, Palette::tint(p.surface, sel));
+        let outline = Rect::from_min_max(r.min, pos2(r.right(), r.bottom() + 4.0));
+        painter.with_clip_rect(r).rect_stroke(outline, top, Stroke::new(1.0, Palette::tint(p.border, sel)), egui::StrokeKind::Inside);
+    }
+    if resp.has_focus() {
+        widgets::focus_ring(painter, r.shrink(3.0), radius::CONTROL, p);
+    }
+    icons::mark(painter, Rect::from_center_size(pos2(r.center().x, r.center().y - 1.0), vec2(20.0, 20.0)), p);
+    resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, selected, "Home"));
+    resp.on_hover_text("Home: new files and recent ones")
 }
 
 /// A group label's menu: rename, colour, collapse, show in the sidebar, close.
@@ -463,12 +593,12 @@ fn draw_tab(
     tabs_area: Rect,
     active: Option<u64>,
     is_dragged: bool,
+    sep: bool,
     pointer: Option<egui::Pos2>,
     drag_target: Option<(u64, usize, f32)>,
     items: &[TabItem],
     st: &mut TabStripState,
     actions: &mut Vec<TabAction>,
-    reduce: bool,
     font: &egui::FontId,
 ) {
     let ctx = ui.ctx().clone();
@@ -481,7 +611,7 @@ fn draw_tab(
     let hovered = resp.hovered() || is_dragged;
 
     // Close button (or dirty dot / spinner) in the slot at the right.
-    let slot_r = Rect::from_center_size(pos2(r.right() - 16.0, r.center().y), vec2(18.0, 18.0));
+    let slot_r = Rect::from_center_size(pos2(r.right() - 17.0, r.center().y - 1.0), vec2(18.0, 18.0));
     let close = ui.interact(slot_r.intersect(tabs_area), Id::unique(("cw_tab_close", tab.id)), Sense::click());
 
     if resp.drag_started()
@@ -514,6 +644,28 @@ fn draw_tab(
             }
         }
         ui.separator();
+        // Add to Project ▸ New Project…, then every project. A project is a folder, so adding
+        // a file puts a copy of it there; the one the file is already in is ticked.
+        ui.menu_button("Add to Project", |ui| {
+            ui.set_min_width(200.0);
+            if ui.button("New Project…").clicked() {
+                actions.push(TabAction::AddToProject { id: tab.id, root: None });
+                ui.close();
+            }
+            if !st.projects.is_empty() {
+                ui.separator();
+            }
+            for choice in &st.projects {
+                let inside = tab.path.as_deref().is_some_and(|f| f.starts_with(&choice.root));
+                let label = if inside { format!("✓ {}", choice.name) } else { choice.name.clone() };
+                let item = ui.add_enabled(!inside, egui::Button::new(label)).on_hover_text(choice.root.display().to_string());
+                if item.clicked() {
+                    actions.push(TabAction::AddToProject { id: tab.id, root: Some(choice.root.clone()) });
+                    ui.close();
+                }
+            }
+        });
+        ui.separator();
         let has_path = tab.path.is_some();
         if ui.add_enabled(has_path, egui::Button::new("Reveal in Finder")).clicked() {
             actions.push(TabAction::Reveal(tab.id));
@@ -531,47 +683,67 @@ fn draw_tab(
     let resp = resp.on_hover_text(tip);
     resp.widget_info(|| egui::WidgetInfo::selected(egui::Role::Tab, true, is_active, &tab.label));
 
-    // Paint.
-    let fill = if is_active {
-        p.surface_raised
-    } else {
-        let t = ctx.animate_bool_with_time(Id::unique(("cw_tab_hover", tab.id)), hovered, motion::dur(motion::HOVER, reduce));
-        Palette::tint(p.surface_hover, t)
-    };
-    let pr = if is_dragged { ui.painter().clone() } else { painter.clone() };
+    // Paint. Three eased states drive everything: selected, hovered, and just arrived.
+    let sel = motion::fade(&ctx, Id::unique(("cw_tab_active", tab.id)), is_active, motion::PANEL);
+    let hov = motion::fade(&ctx, Id::unique(("cw_tab_hover", tab.id)), hovered, motion::HOVER);
+    let born = st.born.get(&tab.id).copied().unwrap_or(f64::NEG_INFINITY);
+    let arrive = motion::enter(&ctx, born, 0.0, motion::MOVE);
+    let mut pr = if is_dragged { ui.painter().clone() } else { painter.clone() };
+    if arrive < 1.0 {
+        pr.multiply_opacity(arrive);
+    }
+    // A new tab grows out of its left edge.
+    let r = Rect::from_min_size(r.min, vec2(r.width() * (0.72 + 0.28 * arrive), r.height()));
+    // The active tab is a piece of the app below, pulled up into the title row: the app's
+    // surface colour, rounded at the top, open at the bottom.
+    let top = CornerRadius { nw: radius::TAB, ne: radius::TAB, sw: 0, se: 0 };
     if is_dragged {
-        pr.rect_filled(r.translate(vec2(0.0, 2.0)), CornerRadius::same(radius::TAB), Palette::tint(Color32::BLACK, 0.12));
+        widgets::shadow(&pr, r, radius::TAB, p, 1.0);
     }
-    pr.rect_filled(r, CornerRadius::same(radius::TAB), fill);
-    if is_active {
-        let bar = Rect::from_min_max(pos2(r.left() + 8.0, r.bottom() - size::TAB_ACCENT), pos2(r.right() - 8.0, r.bottom()));
-        pr.rect_filled(bar, CornerRadius::same(1), p.kind(tab.kind));
+    if hov > 0.0 && sel < 1.0 {
+        let pill = Rect::from_min_max(pos2(r.left() + 3.0, r.top() + 1.0), pos2(r.right() - 3.0, r.bottom() - 4.0));
+        pr.rect_filled(pill, CornerRadius::same(radius::CONTROL), Palette::tint(Palette::mix(p.band, p.surface, 0.6), hov * (1.0 - sel)));
     }
-    let icon_r = Rect::from_center_size(pos2(r.left() + 16.0, r.center().y), vec2(size::ICON, size::ICON));
-    icons::kind(&pr, icon_r, tab.kind, p.kind(tab.kind), if is_active { p.text } else { p.text_muted });
-    let text_left = icon_r.right() + 7.0;
+    if sel > 0.0 {
+        pr.rect_filled(r, top, Palette::tint(p.surface, sel));
+        // Its outline runs up the sides and over the top; the open bottom is clipped away.
+        let outline = Rect::from_min_max(r.min, pos2(r.right(), r.bottom() + 4.0));
+        pr.with_clip_rect(r.intersect(pr.clip_rect())).rect_stroke(outline, top, Stroke::new(1.0, Palette::tint(p.border, sel)), egui::StrokeKind::Inside);
+    }
+    if sep && sel < 0.5 {
+        let x = r.right() - 0.5;
+        pr.line_segment([pos2(x, r.center().y - 8.0), pos2(x, r.center().y + 6.0)], Stroke::new(1.0, Palette::tint(p.border, (1.0 - hov) * (1.0 - sel))));
+    }
+    if resp.has_focus() {
+        widgets::focus_ring(&pr, r.shrink(3.0), radius::CONTROL, p);
+    }
+    let pr = pr.with_clip_rect(r.intersect(pr.clip_rect()));
+    let mid = r.center().y - 1.0;
+    let icon_r = Rect::from_center_size(pos2(r.left() + 18.0, mid), vec2(size::ICON, size::ICON));
+    icons::kind(&pr, icon_r, tab.kind, Color32::WHITE);
+    let text_left = icon_r.right() + 8.0;
     let text_w = (slot_r.left() - 4.0 - text_left).max(0.0);
-    let color = if is_active { p.text } else { p.text_muted };
+    let color = Palette::mix(p.text_muted, p.text, sel.max(hov * 0.6));
+    // The chosen tab's title is set heavier, as the chosen ribbon tab is in the apps.
+    let font = &if is_active { egui::FontId::new(font.size, egui::FontFamily::Name(crate::tokens::SEMIBOLD.into())) } else { font.clone() };
     let label = truncate_middle(&tab.label, text_w, |s| ui.fonts_mut(|f| f.layout_no_wrap(s.to_string(), font.clone(), color).size().x));
-    pr.text(pos2(text_left, r.center().y), egui::Align2::LEFT_CENTER, label, font.clone(), color);
+    pr.text(pos2(text_left, mid), egui::Align2::LEFT_CENTER, label, font.clone(), color);
     if tab.busy {
-        let c = slot_r.center();
-        let t = ctx.input(|i| i.time) as f32 * 6.0;
-        pr.circle_stroke(c, 5.0, Stroke::new(1.5, Palette::tint(p.text_muted, 0.25)));
-        let a = pos2(c.x + 5.0 * t.cos(), c.y + 5.0 * t.sin());
-        pr.line_segment([c, a], Stroke::new(1.5, p.text_muted));
+        icons::spinner(&pr, slot_r.shrink(2.0), ctx.input(|i| i.time), p.text_muted);
         ctx.request_repaint();
     } else if hovered || is_active {
-        if close.hovered() {
-            pr.rect_filled(slot_r, CornerRadius::same(radius::CONTROL), p.surface_hover);
+        let (ch, down) = widgets::hover(ui, &close);
+        if ch > 0.0 {
+            let fill = if down { Palette::mix(p.surface_hover, p.text, 0.16) } else { Palette::mix(p.surface_hover, p.text, 0.08) };
+            pr.circle_filled(slot_r.center(), 9.0, Palette::tint(fill, ch));
         }
-        icons::close(&pr, slot_r.shrink(3.0), if close.hovered() { p.text } else { p.text_muted });
+        icons::close(&pr, slot_r.shrink(3.5), Palette::mix(p.text_muted, p.text, ch));
     } else if tab.dirty {
-        pr.circle_filled(slot_r.center(), 3.5, p.text_muted);
+        pr.circle_filled(slot_r.center(), 3.5, p.kind(tab.kind));
     }
     if tab.dirty && (hovered || is_active) && !close.hovered() {
         // Unsaved and showing ×: a small dot beside the title keeps the state visible.
-        pr.circle_filled(pos2(slot_r.left() - 6.0, r.center().y), 2.5, p.text_muted);
+        pr.circle_filled(pos2(slot_r.left() - 6.0, mid), 2.5, p.kind(tab.kind));
     }
 }
 
@@ -649,6 +821,37 @@ mod tests {
             }
             assert!(!last_requested, "{n} tabs: still asking for frames after 2 s idle");
         }
+    }
+
+    /// Holding "+" drops the quick menu instead of opening a new tab, and letting go leaves
+    /// the menu up.
+    #[test]
+    fn holding_plus_drops_the_quick_menu() {
+        let ctx = egui::Context::default();
+        let mut st = TabStripState::default();
+        let rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(900.0, 38.0));
+        let mut time = 0.0;
+        let mut run = |events: Vec<egui::Event>, st: &mut TabStripState, dt: f64| {
+            time += dt;
+            let mut got = Vec::new();
+            let mut out = ctx.run_ui(egui::RawInput { events, time: Some(time), ..Default::default() }, |ui| {
+                got = tab_strip(ui, rect, &Palette::LIGHT, &[], &[], None, st);
+            });
+            out.textures_delta.clear();
+            got
+        };
+        let _ = run(vec![], &mut st, 0.1);
+        let pos = st.plus_rect.map(|r| r.center()).unwrap_or_default();
+        let button = |pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        let mut all = run(vec![egui::Event::PointerMoved(pos), button(true)], &mut st, 0.1);
+        for _ in 0..6 {
+            all.extend(run(vec![], &mut st, 0.1));
+        }
+        assert!(st.plus_menu, "the menu drops after {LONG_PRESS} s");
+        all.extend(run(vec![button(false)], &mut st, 0.1));
+        all.extend(run(vec![], &mut st, 0.1));
+        assert!(st.plus_menu, "letting go keeps it");
+        assert!(!all.contains(&TabAction::NewTab), "a long press is not a click: {all:?}");
     }
 
     #[test]

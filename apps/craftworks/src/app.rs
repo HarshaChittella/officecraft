@@ -85,6 +85,16 @@ pub struct App {
     titlebar_measured: bool,
     strip: TabStripState,
     pub newtab: NewTab,
+    /// A blank document made only to show its app's New page (Home's tiles): it goes away
+    /// once a template makes the real one. The tab, its kind, and how many of that kind's
+    /// documents were open then.
+    gallery: Option<(TabId, Kind, usize)>,
+    /// The new-tab page was showing at the end of the last frame.
+    page_was_open: bool,
+    /// Home's "Open Project…" was chosen: ask for the folder on the next frame.
+    pending_open_project: bool,
+    /// The tab in front and how many tabs there were last frame: a change puts Home away.
+    home_seen: (Option<u64>, usize),
     pub toasts: Toasts,
     recent: Recent,
     /// The project sidebar, and the projects behind it.
@@ -156,6 +166,10 @@ impl App {
             titlebar_measured: false,
             strip: TabStripState::default(),
             newtab: NewTab::default(),
+            gallery: None,
+            page_was_open: false,
+            pending_open_project: false,
+            home_seen: (None, 0),
             toasts: Toasts::default(),
             recent: settings::load_recent(),
             sidebar: Sidebar::default(),
@@ -345,20 +359,7 @@ impl App {
             }
             SidebarAction::SwitchProject(root) => self.open_project(&root, None, ctx),
             SidebarAction::NewProject => {
-                if !self.platform.interactive {
-                    return;
-                }
-                if let Some(path) = rfd::FileDialog::new().set_title("New Project").set_file_name("New Project").save_file() {
-                    match std::fs::create_dir_all(&path) {
-                        Ok(()) => {
-                            let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
-                            self.open_project(&path, name.as_deref(), ctx);
-                        }
-                        Err(e) => {
-                            self.toasts.error(format!("Couldn't make the project folder: {e}"));
-                        }
-                    }
-                }
+                let _ = self.new_project(ctx);
             }
             SidebarAction::OpenFolder => {
                 if !self.platform.interactive {
@@ -367,6 +368,89 @@ impl App {
                 if let Some(dir) = rfd::FileDialog::new().set_title("Open Folder as Project").pick_folder() {
                     self.open_project(&dir, None, ctx);
                 }
+            }
+        }
+    }
+
+    /// Asks where the new project goes, makes its folder and opens it. `None` if the user
+    /// cancelled or it couldn't be made (a toast says why).
+    fn new_project(&mut self, ctx: &egui::Context) -> Option<PathBuf> {
+        if !self.platform.interactive {
+            return None;
+        }
+        let path = rfd::FileDialog::new().set_title("New Project").set_file_name("New Project").save_file()?;
+        match std::fs::create_dir_all(&path) {
+            Ok(()) => {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned());
+                self.open_project(&path, name.as_deref(), ctx);
+                Some(path)
+            }
+            Err(e) => {
+                self.toasts.error(format!("Couldn't make the project folder: {e}"));
+                None
+            }
+        }
+    }
+
+    /// Puts the file in tab `id` into the project at `root` (a tab's "Add to Project"). A
+    /// project is a folder, so this saves a copy of the document there and the tab carries on
+    /// with that copy; the original stays where it was. Nothing is ever replaced.
+    pub fn add_tab_to_project(&mut self, ctx: &egui::Context, id: u64, root: &Path) {
+        let Some(item) = self.tab_items().into_iter().find(|t| t.id == id) else { return };
+        let Some((tab_id, kind, doc)) = self.tabs.iter().find(|t| t.id.0 == id).map(|t| (t.id, t.kind, t.doc)) else {
+            self.toasts.info("Wait until the file has opened, then add it");
+            return;
+        };
+        if item.path.as_deref().is_some_and(|p| p.starts_with(root)) {
+            self.toasts.info(format!("{} is already in that project", item.label));
+            return;
+        }
+        self.open_project(root, None, ctx);
+        let project = self.projects.owner_of(&root.join("x")).map_or_else(|| file_name(root), |p| p.settings.name.clone());
+        // Its name there: the file's own, or the title with the kind's extension if it has never been saved.
+        let name = match &item.path {
+            Some(p) => file_name(p),
+            None => {
+                let ext = match kind {
+                    Kind::Document => "docx",
+                    Kind::Sheet => "xlsx",
+                    Kind::Presentation => "pptx",
+                    Kind::Pdf => "pdf",
+                };
+                let title = if sidebar::valid_name(&item.label) { item.label.clone() } else { format!("Untitled {}", kind.label()) };
+                if Kind::for_path(Path::new(&title)) == Some(kind) { title } else { format!("{title}.{ext}") }
+            }
+        };
+        let target = sidebar::free_name(root, &name, |p| p.exists());
+        if kind == Kind::Pdf {
+            // PdfCraft keeps Save As to itself: copy the file as it is on disk and show the copy.
+            let Some(from) = item.path.clone() else {
+                self.toasts.info("Save the PDF first, then add it to the project");
+                return;
+            };
+            if item.dirty {
+                self.toasts.info(format!("Save {} first, then add it to the project", item.label));
+                return;
+            }
+            match std::fs::copy(&from, &target) {
+                Ok(_) => {
+                    self.open(&target);
+                    self.close_tab(tab_id);
+                    self.toasts.info(format!("Added a copy of {} to {project}", item.label));
+                }
+                Err(e) => {
+                    self.toasts.error(format!("Couldn't add {} to {project}: {e}", item.label));
+                }
+            }
+            return;
+        }
+        match self.engine(kind).editor_mut().save_as(doc, &target) {
+            Ok(()) => {
+                let what = if item.path.is_some() { "Added a copy of" } else { "Saved" };
+                self.toasts.info(format!("{what} {} {} {project}", file_name(&target), if item.path.is_some() { "to" } else { "in" }));
+            }
+            Err(e) => {
+                self.toasts.error(format!("Couldn't add {} to {project}: {e}", item.label));
             }
         }
     }
@@ -719,6 +803,42 @@ impl App {
         self.dark.unwrap_or(false)
     }
 
+    /// A new file of `kind` by way of its app's own New page (Home's tiles): a blank one is
+    /// made to stand on, and the app's template gallery opens over it. Pick a template and the
+    /// stand-in goes; pick nothing and it is your blank document.
+    pub fn new_from_templates(&mut self, kind: Kind) {
+        let before = self.tabs.iter().filter(|t| t.kind == kind).count();
+        self.new_document(kind);
+        let Some(tab) = self.tabs.active().copied().filter(|t| t.kind == kind) else { return };
+        if self.tabs.iter().filter(|t| t.kind == kind).count() == before {
+            return;
+        }
+        match self.engine(kind).editor_mut().show_new_page() {
+            Ok(()) => self.gallery = Some((tab.id, kind, before + 1)),
+            Err(e) => log::info!("{} has no New page: {e}", kind.label()),
+        }
+    }
+
+    /// Clears away the stand-in blank once a template has made a document beside it (and
+    /// forgets it as soon as it is typed in, or left for another tab).
+    fn step_gallery(&mut self) {
+        let Some((tab, kind, count)) = self.gallery else { return };
+        let Some(stand_in) = self.tabs.iter().find(|t| t.id == tab).copied() else {
+            self.gallery = None;
+            return;
+        };
+        let dirty = self.engine_ref(kind).is_some_and(|e| e.editor().documents().iter().any(|d| d.id == stand_in.doc && (d.dirty || d.path.is_some())));
+        let now = self.tabs.iter().filter(|t| t.kind == kind).count();
+        if dirty {
+            self.gallery = None;
+        } else if now > count {
+            self.gallery = None;
+            self.close_tab(tab);
+        } else if self.tabs.active().is_some_and(|t| t.id != tab) {
+            self.gallery = None;
+        }
+    }
+
     pub fn new_document(&mut self, kind: Kind) {
         match self.engine(kind).editor_mut().new_document() {
             Ok(doc) => {
@@ -968,10 +1088,24 @@ impl App {
                     }
                 }
             }
+            TabAction::AddToProject { id, root } => {
+                // "New Project…" asks for the folder first.
+                let root = match root {
+                    Some(r) => Some(r),
+                    None => self.new_project(ctx),
+                };
+                if let Some(root) = root {
+                    self.add_tab_to_project(ctx, id, &root);
+                }
+            }
             TabAction::Move { id, to } => {
                 self.tabs.move_to(tab(id), to);
             }
             TabAction::NewTab => self.newtab.toggle(),
+            TabAction::NewBlank(kind) => {
+                self.newtab.open = false;
+                self.new_document(kind);
+            }
             TabAction::Drop { at, paths } => {
                 for p in &paths {
                     self.open(p);
@@ -1041,8 +1175,10 @@ impl App {
     fn on_newtab_action(&mut self, a: NewTabAction) {
         match a {
             NewTabAction::New(kind) => self.new_document(kind),
+            NewTabAction::Templates(kind) => self.new_from_templates(kind),
             NewTabAction::OpenPdf => self.choose_file(true),
             NewTabAction::OpenFile => self.choose_file(false),
+            NewTabAction::OpenProject => self.pending_open_project = true,
             NewTabAction::OpenRecent(p) => self.open(&p),
             NewTabAction::ForgetRecent(p) => {
                 self.recent.forget(&p);
@@ -1320,7 +1456,22 @@ impl eframe::App for App {
         let fullscreen = ctx.input(|i| i.viewport().fullscreen.unwrap_or(false));
         let tb = if fullscreen { self.titlebar.fullscreen() } else { self.titlebar };
         let mut actions = Vec::new();
-        egui::Panel::top("cw_title").exact_size(tb.height).frame(egui::Frame::NONE.fill(p.surface)).show(ui, |ui| {
+        // Home goes away when a tab comes to the front, opens or closes.
+        let tab_state = (self.tabs.active().map(|t| t.id.0), self.tabs.len());
+        if tab_state != self.home_seen {
+            self.home_seen = tab_state;
+            // Only a page that was already showing: one asked for in this same frame stays.
+            if self.page_was_open {
+                self.newtab.open = false;
+            }
+        }
+        self.page_was_open = self.newtab.open;
+        self.step_gallery();
+        if std::mem::take(&mut self.pending_open_project) {
+            self.on_sidebar_action(&ctx, SidebarAction::OpenFolder);
+        }
+        let home_showing = self.newtab.open || (self.tabs.is_empty() && self.pending_opens.is_empty());
+        egui::Panel::top("cw_title").exact_size(tb.height).show_separator_line(false).frame(egui::Frame::NONE.fill(p.band)).show(ui, |ui| {
             let r = ui.max_rect();
             ui.painter().hline(r.x_range(), r.bottom() - 0.5, Stroke::new(1.0, p.hairline));
             // The AI's pill at the right, once an AI has been in touch.
@@ -1339,17 +1490,37 @@ impl eframe::App for App {
                     ctx.request_repaint_after(Duration::from_millis(500));
                 }
             }
-            let strip = Rect::from_min_max(pos2(r.left() + tb.content_left, r.top()), pos2(right, r.bottom()));
+            // Beside the traffic lights: the sidebar toggle, then Home, then the tabs.
+            let side = 26.0;
+            let toggle = Rect::from_center_size(pos2(r.left() + tb.content_left + side / 2.0, r.center().y), egui::vec2(side, side));
+            let open = self.sidebar.open;
+            let tr = craftworks_shell::widgets::icon_button(ui, &p, toggle, egui::Id::unique("cw_sidebar_toggle"), "Sidebar", open, |painter, rect, color| {
+                craftworks_shell::icons::sidebar(painter, rect, open, color);
+            });
+            if tr.on_hover_text(if open { "Hide sidebar (⌃⌘S)" } else { "Show sidebar (⌃⌘S)" }).clicked() {
+                self.sidebar.toggle();
+            }
+            let home = Rect::from_min_max(pos2(toggle.right() + 6.0, r.top() + 5.0), pos2(toggle.right() + 6.0 + 40.0, r.bottom()));
+            if craftworks_shell::tabs::home_tab(ui, &p, home, home_showing).clicked() && !self.tabs.is_empty() {
+                self.newtab.toggle();
+            }
+            let strip = Rect::from_min_max(pos2(home.right() + 2.0, r.top()), pos2(right, r.bottom()));
             let items = self.tab_items();
             let groups = self.group_items();
-            let active = self.tabs.active().map(|t| t.id.0);
+            self.strip.projects =
+                self.projects.items.iter().map(|i| craftworks_shell::ProjectChoice { name: i.name.clone(), root: i.root.clone() }).collect();
+            let active = self.tabs.active().map(|t| t.id.0).filter(|_| !home_showing);
             actions = tab_strip(ui, strip, &p, &items, &groups, active, &mut self.strip);
         });
         for a in actions {
+            // Choosing a tab (even the one already in front) leaves Home.
+            if matches!(a, TabAction::Activate(_)) {
+                self.newtab.open = false;
+            }
             self.on_tab_action(&ctx, a);
         }
 
-        if self.sidebar.open {
+        {
             let pinned = self.projects.pinned();
             let active = self.active_path();
             let current = self.projects.current_item();
@@ -1365,14 +1536,20 @@ impl eframe::App for App {
                 read_only,
             };
             let sidebar = &mut self.sidebar;
+            let open = sidebar.open;
+            let mut expanded = open;
+            // It slides in and out, pushing the tab's content over (instant with Reduce motion).
             let acts = egui::Panel::left("cw_sidebar")
                 .resizable(true)
                 .default_size(sidebar::WIDTH)
                 .size_range(sidebar::MIN_WIDTH..=sidebar::MAX_WIDTH)
+                .show_separator_line(false)
                 .frame(egui::Frame::NONE.fill(p.surface))
-                .show(ui, |ui| sidebar.show(ui, &p, &view))
-                .inner;
-            for a in acts {
+                .show_collapsible(ui, &mut expanded, |ui| sidebar.show(ui, &p, &view))
+                .map(|r| r.inner)
+                .unwrap_or_default();
+            // Only an open sidebar acts: what it draws while sliding shut is for show.
+            for a in acts.into_iter().filter(|_| open) {
                 self.on_sidebar_action(&ctx, a);
             }
         }
@@ -1381,7 +1558,7 @@ impl eframe::App for App {
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(p.surface)).show(ui, |ui| {
             let rect = ui.max_rect();
             self.content_rect = rect;
-            if self.tabs.is_empty() && self.pending_opens.is_empty() {
+            if home_showing {
                 let home = settings::home();
                 let exists = |p: &Path| p.exists();
                 let view = RecentView { recent: &self.recent, now: chrono::Local::now(), home: home.as_deref(), exists: &exists };
@@ -1395,14 +1572,6 @@ impl eframe::App for App {
         });
         if let Some(a) = page_action {
             self.on_newtab_action(a);
-        }
-        if let Some(anchor) = self.strip.plus_rect {
-            let home = settings::home();
-            let exists = |p: &Path| p.exists();
-            let view = RecentView { recent: &self.recent, now: chrono::Local::now(), home: home.as_deref(), exists: &exists };
-            if let Some(a) = self.newtab.popover(&ctx, &p, anchor, &view) {
-                self.on_newtab_action(a);
-            }
         }
         if self.ai.review_open
             && let Some(anchor) = self.ai.pill_rect

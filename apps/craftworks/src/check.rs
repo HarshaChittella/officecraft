@@ -52,6 +52,11 @@ enum Stage {
     Quit { phase: u8 },
     Memory { phase: u8 },
     Idle { started: bool, focused: bool },
+    /// Home's tiles open each app's own New page.
+    Templates {
+        n: u8,
+        started: Option<usize>,
+    },
     Report,
     Done,
 }
@@ -231,7 +236,7 @@ impl Check {
                     // WordCraft animates its caret's blink (a fade over a few frames), as the
                     // standalone app does: budgeted, not zero.
                     self.check(pct < 8.0, format!("a focused document with a blinking caret stays light ({pct:.1} % CPU, budget 8 %)"));
-                    self.stage = Stage::Quit { phase: 0 };
+                    self.stage = Stage::Templates { n: 0, started: None };
                 } else if input > 0 && pct >= 1.0 && self.idle_retries < 2 {
                     // macOS still sends mouse moves to a background window under the pointer, and
                     // each is a frame: someone using the Mac spoiled this measurement. Again.
@@ -365,11 +370,11 @@ impl Check {
                     if let Some((tab, _)) = Self::tab_of(app, Kind::Document) {
                         app.tabs.activate(tab);
                     }
-                    app.newtab.show_popover();
+                    app.newtab.show();
                     self.stage = Stage::NewTab { shot: true };
                     self.wait = 30;
                 } else {
-                    self.check(app.newtab.open, "⌘T's new-tab popover is open");
+                    self.check(app.newtab.open, "⌘T's new-tab page is open");
                     self.screenshot(ctx, "new-tab");
                     self.stage = Stage::NewTabClose;
                 }
@@ -559,7 +564,7 @@ impl Check {
                         self.wait = 8;
                     }
                     3 => {
-                        self.check(app.newtab.open, "⌘T opens the new-tab popover");
+                        self.check(app.newtab.open, "⌘T opens the new-tab page");
                         let before = doc_text(app);
                         hook(app, vec![egui::Event::Text("zq".into())]);
                         self.wait = 5;
@@ -1450,6 +1455,29 @@ impl Check {
                     }
                 }
                 self.stage = Stage::Quit { phase: phase + 1 };
+            }
+            Stage::Templates { n, started } => {
+                const KINDS: [Kind; 3] = [Kind::Document, Kind::Sheet, Kind::Presentation];
+                let count = |app: &App, k: Kind| app.tabs.iter().filter(|t| t.kind == k).count();
+                match (KINDS.get(usize::from(n)).copied(), started) {
+                    (Some(kind), None) => {
+                        let before = count(app, kind);
+                        app.new_from_templates(kind);
+                        self.stage = Stage::Templates { n, started: Some(before) };
+                        self.wait = 45;
+                    }
+                    (Some(kind), Some(before)) => {
+                        let front = app.tabs.active().map(|t| t.kind);
+                        self.check(
+                            count(app, kind) == before + 1 && front == Some(kind),
+                            format!("Home's {} tile opens a new tab on its app's New page ({} → {})", kind.label(), before, count(app, kind)),
+                        );
+                        self.screenshot(ctx, &format!("templates-{}", kind.label().to_lowercase()));
+                        self.stage = Stage::Templates { n: n + 1, started: None };
+                    }
+                    // (A blank PDF is new, unsaved work: it would add a prompt to the quit below.)
+                    (None, _) => self.stage = Stage::Quit { phase: 0 },
+                }
             }
             Stage::Report => {
                 let warnings = logger::warnings();

@@ -79,7 +79,10 @@ impl Editor for PdfEditor {
     }
 
     fn new_document(&mut self) -> Result<DocId> {
-        Err("A PDF is opened, not created: use Open.".into())
+        // PdfCraft's Create ▸ Blank Page: one empty page of its usual paper size, not yet saved.
+        let before = self.app.views.len();
+        self.app.run_command("create.blank");
+        if self.app.views.len() > before { self.active().ok_or_else(|| "PdfCraft made no tab".into()) } else { Err("PdfCraft couldn't make a blank PDF.".into()) }
     }
 
     fn open(&mut self, path: &Path) -> Result<Opened> {

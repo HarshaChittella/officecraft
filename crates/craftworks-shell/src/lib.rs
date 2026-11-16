@@ -13,10 +13,11 @@ pub mod sidebar;
 pub mod tabs;
 pub mod toast;
 pub mod tokens;
+pub mod widgets;
 
 pub use newtab::{NewTab, NewTabAction, RecentView};
 pub use recent::{Recent, RecentFile};
 pub use sidebar::{ProjectItem, Sidebar, SidebarAction, SidebarView};
-pub use tabs::{GroupItem, TabAction, TabItem, TabStripState, tab_strip};
+pub use tabs::{GroupItem, ProjectChoice, TabAction, TabItem, TabStripState, tab_strip};
 pub use toast::Toasts;
 pub use tokens::Palette;

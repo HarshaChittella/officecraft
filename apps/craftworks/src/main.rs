@@ -68,6 +68,9 @@ fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title("Craftworks")
+            // No icon of our own at run time: the Dock then shows the bundle's icon, the same one
+            // Finder and Launchpad show (eframe would otherwise put egui's default icon in the Dock).
+            .with_icon(std::sync::Arc::new(egui::IconData::default()))
             .with_inner_size([1440.0, 920.0])
             .with_min_inner_size([760.0, 480.0])
             .with_fullsize_content_view(true)
