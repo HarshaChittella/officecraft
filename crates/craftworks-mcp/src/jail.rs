@@ -68,6 +68,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
 
+    #[cfg(unix)]
     #[test]
     fn paths_stay_in_the_project() {
         let base = std::env::temp_dir().join(format!("cw-jail-{}", std::process::id()));

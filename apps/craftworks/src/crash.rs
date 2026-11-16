@@ -14,6 +14,12 @@ pub fn dir() -> Option<PathBuf> {
     if let Some(d) = DIR.get() {
         return Some(d.clone());
     }
+    // Windows: %APPDATA%\Craftworks\Logs, where Windows apps keep theirs.
+    if cfg!(windows)
+        && let Some(appdata) = std::env::var_os("APPDATA")
+    {
+        return Some(PathBuf::from(appdata).join("Craftworks/Logs"));
+    }
     let home = std::env::home_dir()?;
     Some(if cfg!(target_os = "macos") { home.join("Library/Logs/Craftworks") } else { home.join(".local/state/craftworks") })
 }

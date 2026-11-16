@@ -228,7 +228,7 @@ impl Sidebar {
                     if ui.button("Unpin").clicked() {
                         out.push(SidebarAction::TogglePin(path.clone()));
                     }
-                    if ui.button("Reveal in Finder").clicked() {
+                    if ui.button(REVEAL).clicked() {
                         out.push(SidebarAction::Reveal(path.clone()));
                     }
                 });
@@ -293,7 +293,7 @@ impl Sidebar {
                 if ui.button("Rename…").clicked() {
                     self.renaming = Some((e.path.clone(), name.clone()));
                 }
-                if ui.button("Reveal in Finder").clicked() {
+                if ui.button(REVEAL).clicked() {
                     out.push(SidebarAction::Reveal(e.path.clone()));
                 }
                 if !e.is_dir && e.kind.is_some() {
@@ -478,6 +478,9 @@ pub fn valid_name(name: &str) -> bool {
     let n = name.trim();
     !n.is_empty() && n != "." && n != ".." && !n.starts_with('.') && !n.contains('/') && !n.contains(':') && n.len() <= 255
 }
+
+/// "Reveal in Finder", or File Explorer on Windows.
+const REVEAL: &str = if cfg!(windows) { "Show in File Explorer" } else { "Reveal in Finder" };
 
 #[cfg(test)]
 mod tests {

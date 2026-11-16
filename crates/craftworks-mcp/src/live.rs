@@ -1,6 +1,7 @@
 //! The link between the MCP server (its own process) and the running Craftworks window: a
-//! Unix socket in Craftworks' settings folder, and a token written there at each launch,
-//! readable only by you (mode 0600, as GridCraft's `control_auth` does). Requests are JSON
+//! Unix socket in Craftworks' settings folder (on Windows, a loopback TCP port named in the
+//! settings folder), and a token written there at each launch, readable only by you (mode 0600
+//! on Unix, as GridCraft's `control_auth` does; on Windows the profile folder's own access). Requests are JSON
 //! lines; the window runs them on its main thread against the open tab, so an AI's edit is an
 //! ordinary command you watch happen and can undo.
 //!
@@ -13,8 +14,12 @@
 
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
-use std::os::unix::net::{UnixListener, UnixStream};
+#[cfg(unix)]
+use std::os::unix::net::{UnixListener as Listener, UnixStream as Stream};
+#[cfg(not(unix))]
+use std::net::{TcpListener as Listener, TcpStream as Stream};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
@@ -49,6 +54,11 @@ pub fn settings_dir() -> Option<PathBuf> {
         return Some(PathBuf::from(d));
     }
     let home = std::env::home_dir()?;
+    if cfg!(windows)
+        && let Some(appdata) = std::env::var_os("APPDATA")
+    {
+        return Some(PathBuf::from(appdata).join("Craftworks"));
+    }
     Some(if cfg!(target_os = "macos") { home.join("Library/Application Support/Craftworks") } else { home.join(".config/craftworks") })
 }
 
@@ -96,9 +106,18 @@ pub struct LiveServer {
     addr_file: PathBuf,
 }
 
+/// A file only you can read: created new, mode 0600 on Unix.
+fn private_file(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create_new(true);
+    #[cfg(unix)]
+    o.mode(0o600);
+    o.open(path)
+}
+
 fn random_token() -> std::io::Result<String> {
     let mut b = [0u8; 32];
-    std::fs::File::open("/dev/urandom")?.read_exact(&mut b)?;
+    getrandom::fill(&mut b).map_err(|e| std::io::Error::other(e.to_string()))?;
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
 }
 
@@ -115,18 +134,27 @@ impl LiveServer {
         let token_file = dir.join(TOKEN);
         let _ = std::fs::remove_file(&socket);
         let _ = std::fs::remove_file(dir.join(ADDR));
-        if socket != dir.join(SOCKET) {
-            let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(dir.join(ADDR))?;
-            f.write_all(socket.as_os_str().as_encoded_bytes())?;
-        }
         let token = random_token()?;
         {
             let _ = std::fs::remove_file(&token_file);
-            let mut f = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&token_file)?;
-            f.write_all(token.as_bytes())?;
+            private_file(&token_file)?.write_all(token.as_bytes())?;
         }
-        let listener = UnixListener::bind(&socket)?;
-        std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
+        #[cfg(unix)]
+        let listener = {
+            if socket != dir.join(SOCKET) {
+                private_file(&dir.join(ADDR))?.write_all(socket.as_os_str().as_encoded_bytes())?;
+            }
+            let l = Listener::bind(&socket)?;
+            std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
+            l
+        };
+        // Windows: a port on the loopback only; its number goes where the socket's path would.
+        #[cfg(not(unix))]
+        let listener = {
+            let l = Listener::bind(("127.0.0.1", 0))?;
+            private_file(&dir.join(ADDR))?.write_all(format!("tcp:{}", l.local_addr()?).as_bytes())?;
+            l
+        };
         let (tx, rx) = channel::<Request>();
         let wake = std::sync::Arc::new(wake);
         std::thread::Builder::new().name("craftworks-live".into()).spawn(move || {
@@ -152,7 +180,7 @@ impl Drop for LiveServer {
     }
 }
 
-fn serve(conn: UnixStream, token: &str, tx: &Sender<Request>, wake: &dyn Fn()) {
+fn serve(conn: Stream, token: &str, tx: &Sender<Request>, wake: &dyn Fn()) {
     let Ok(mut out) = conn.try_clone() else { return };
     let mut lines = BufReader::new(conn.take(u64::MAX));
     loop {
@@ -192,8 +220,8 @@ fn serve(conn: UnixStream, token: &str, tx: &Sender<Request>, wake: &dyn Fn()) {
 
 /// The MCP server's end: a connection to the running window, if there is one.
 pub struct LiveClient {
-    reader: BufReader<UnixStream>,
-    writer: UnixStream,
+    reader: BufReader<Stream>,
+    writer: Stream,
     token: String,
     next: u64,
 }
@@ -202,8 +230,11 @@ impl LiveClient {
     /// Connects to the window whose settings folder is `dir`. `None` when it isn't running.
     pub fn connect(dir: &Path) -> Option<LiveClient> {
         let token = std::fs::read_to_string(dir.join(TOKEN)).ok()?.trim().to_string();
-        let socket = std::fs::read_to_string(dir.join(ADDR)).map(|s| PathBuf::from(s.trim())).unwrap_or_else(|_| dir.join(SOCKET));
-        let stream = UnixStream::connect(socket).ok()?;
+        let addr = std::fs::read_to_string(dir.join(ADDR)).ok();
+        #[cfg(unix)]
+        let stream = Stream::connect(addr.map(|s| PathBuf::from(s.trim())).unwrap_or_else(|| dir.join(SOCKET))).ok()?;
+        #[cfg(not(unix))]
+        let stream = Stream::connect(addr?.trim().strip_prefix("tcp:")?).ok()?;
         stream.set_read_timeout(Some(TIMEOUT + Duration::from_secs(5))).ok()?;
         let writer = stream.try_clone().ok()?;
         Some(LiveClient { reader: BufReader::new(stream), writer, token, next: 0 })

@@ -3,3 +3,8 @@
 [env]
 CRAFT_FONTS_DIR = { value = "vendor/craft-fonts", relative = true }
 CRAFT_I18N_DIR = { value = "vendor/craft-i18n", relative = true }
+
+# Windows: the C runtime linked in, so Craftworks.exe needs no Visual C++ redistributable
+# (packaging/windows/package.sh).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

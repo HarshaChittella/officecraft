@@ -667,7 +667,7 @@ fn draw_tab(
         });
         ui.separator();
         let has_path = tab.path.is_some();
-        if ui.add_enabled(has_path, egui::Button::new("Reveal in Finder")).clicked() {
+        if ui.add_enabled(has_path, egui::Button::new(REVEAL)).clicked() {
             actions.push(TabAction::Reveal(tab.id));
             ui.close();
         }
@@ -746,6 +746,9 @@ fn draw_tab(
         pr.circle_filled(pos2(slot_r.left() - 6.0, mid), 2.5, p.kind(tab.kind));
     }
 }
+
+/// "Reveal in Finder", or File Explorer on Windows.
+const REVEAL: &str = if cfg!(windows) { "Show in File Explorer" } else { "Reveal in Finder" };
 
 #[cfg(test)]
 mod tests {

@@ -1726,6 +1726,7 @@ dependencies = [
  "craftworks-core",
  "deckcraft-mcp",
  "egui",
+ "getrandom 0.3.4",
  "gridcraft-mcp",
  "log",
  "pdfcraft-automation",

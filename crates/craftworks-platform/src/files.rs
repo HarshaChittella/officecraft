@@ -31,23 +31,36 @@ pub fn openable(url: &str) -> bool {
     ["https://", "http://", "mailto:", "file://"].iter().any(|s| lower.starts_with(s)) && !lower.contains('\n')
 }
 
-/// Opens a link with the system's default app (`open`, macOS).
-/// Shows `path` selected in a Finder window.
+/// What the system's file browser is called, for menu items ("Reveal in Finder").
+pub const FILE_BROWSER: &str = if cfg!(target_os = "macos") { "Finder" } else if cfg!(windows) { "File Explorer" } else { "Files" };
+
+/// Shows `path` selected in Finder (File Explorer on Windows).
 pub fn reveal(path: &std::path::Path) {
     #[cfg(target_os = "macos")]
-    if let Err(e) = std::process::Command::new("open").arg("-R").arg("--").arg(path).spawn() {
+    let r = std::process::Command::new("open").arg("-R").arg("--").arg(path).spawn();
+    #[cfg(windows)]
+    let r = std::process::Command::new("explorer").arg(format!("/select,{}", path.display())).spawn();
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let r = std::process::Command::new("xdg-open").arg(path.parent().unwrap_or(path)).spawn();
+    if let Err(e) = r {
         log::warn!("revealing {}: {e}", path.display());
     }
-    #[cfg(not(target_os = "macos"))]
-    log::info!("reveal {}: not on this system", path.display());
 }
+
+/// Opens a link with the system's default app (`open` on macOS, `start` on Windows).
 
 pub fn open_url(url: &str) {
     if !openable(url) {
         log::warn!("not opening {url:?}: only web, mail and file links open");
         return;
     }
-    if let Err(e) = std::process::Command::new("open").arg("--").arg(url).spawn() {
+    #[cfg(target_os = "macos")]
+    let r = std::process::Command::new("open").arg("--").arg(url).spawn();
+    #[cfg(windows)]
+    let r = std::process::Command::new("cmd").args(["/C", "start", "", url]).spawn();
+    #[cfg(not(any(target_os = "macos", windows)))]
+    let r = std::process::Command::new("xdg-open").arg(url).spawn();
+    if let Err(e) = r {
         log::warn!("opening {url}: {e}");
     }
 }

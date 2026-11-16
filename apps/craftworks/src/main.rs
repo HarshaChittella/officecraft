@@ -12,6 +12,9 @@
 //! craftworks open FILE…                 open files in the running window (or start it)
 //! ```
 //! `CW_LOG=debug` logs more (default: warnings).
+// On Windows: a windowed app, with no console window of its own (`mcp` still talks over the
+// pipes it is started with).
+#![cfg_attr(windows, windows_subsystem = "windows")]
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod ai;

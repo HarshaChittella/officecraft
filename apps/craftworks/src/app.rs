@@ -1089,9 +1089,7 @@ impl App {
                 let path = self.tab_items().into_iter().find(|t| t.id == id).and_then(|t| t.path);
                 if let Some(path) = path {
                     if matches!(a, TabAction::Reveal(_)) {
-                        if let Err(e) = std::process::Command::new("open").arg("-R").arg(&path).spawn() {
-                            self.toasts.error(format!("Couldn't show it in Finder: {e}"));
-                        }
+                        craftworks_platform::files::reveal(&path);
                     } else {
                         ctx.copy_text(path.display().to_string());
                         self.toasts.info("Path copied");
@@ -1223,7 +1221,7 @@ impl App {
                                 ui.label(egui::RichText::new(format!("{} → {}", a.have, a.latest)).color(p.text_muted));
                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                                     if ui.link(egui::RichText::new("What's new").font(text::meta())).clicked() {
-                                        let _ = std::process::Command::new("/usr/bin/open").arg(&a.url).spawn();
+                                        craftworks_platform::files::open_url(&a.url);
                                     }
                                 });
                             });
@@ -1281,7 +1279,7 @@ impl App {
             self.updates.start_update(ctx);
         }
         if show_log && let Some(log) = &self.updates.log {
-            let _ = std::process::Command::new("/usr/bin/open").arg("-R").arg(log).spawn();
+            craftworks_platform::files::reveal(log);
         }
         if restart {
             self.updates.popover_open = false;

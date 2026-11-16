@@ -25,6 +25,7 @@ impl Default for TitleBar {
 impl TitleBar {
     /// The row for lights whose right edge is `right`, centre `centre_y` below the top of the
     /// window, and diameter `light`.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub fn around_lights(right: f32, centre_y: f32, light: f32) -> TitleBar {
         let height = (2.0 * centre_y).max(32.0);
         let gap = ((height - light) / 2.0).max(8.0);
