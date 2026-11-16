@@ -42,6 +42,11 @@ pub fn is_read_only(method: &str, params: &Value) -> bool {
     match method {
         "document.inspect" | "engine.commands" | "sheet.read" | "ui.render" | "render.page" | "ui.parity" | "ping" | "ui.inspect"
         | "ui.screenshot" => true,
+        // PdfCraft's tools (H7) say themselves whether they only read.
+        "tools/call" => {
+            let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
+            pdfcraft_automation::tools().iter().any(|t| t.name == name && t.read_only)
+        }
         "engine.execute" | "command" => {
             let id = params.get("command").and_then(Value::as_str).unwrap_or_default();
             let last = id.rsplit('.').next().unwrap_or(id).to_ascii_lowercase();
@@ -262,6 +267,8 @@ mod tests {
         assert!(!is_read_only("engine.execute", &json!({"command": "cell.set"})));
         assert!(!is_read_only("engine.execute", &json!({"command": "text.insert"})));
         assert!(!is_read_only("ui.click", &json!({})));
+        assert!(is_read_only("tools/call", &json!({"name": "doc_info"})));
+        assert!(!is_read_only("tools/call", &json!({"name": "page_rotate"})));
     }
 
     #[test]

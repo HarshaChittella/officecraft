@@ -15,13 +15,15 @@ pub const GO_TO_PAGE: &str = "craftworks.goToPage";
 
 pub struct PdfEditor {
     app: PdfCraftApp,
+    /// PdfCraft's own MCP server, lent the open documents for each live request (H7).
+    tools: Option<pdfcraft_automation::mcp::McpServer>,
 }
 
 impl PdfEditor {
     pub fn new() -> Self {
         let mut app = PdfCraftApp::new();
         app.hosted = true;
-        PdfEditor { app }
+        PdfEditor { app, tools: None }
     }
 
     pub fn app(&mut self) -> &mut PdfCraftApp {
@@ -128,6 +130,36 @@ impl Editor for PdfEditor {
         // PdfCraft's catalogue commands take no arguments; they act on the active tab.
         self.app.run_command(id);
         Ok(json!({}))
+    }
+
+    /// `tools/call` with `{name, arguments}`: one of PdfCraft's automation tools, run on the
+    /// open documents (the window's session, lent for the call: H7). `doc` is filled in when
+    /// the tool takes one and the request didn't say. The answer is the MCP tool result.
+    fn control(&mut self, doc: DocId, method: &str, params: Value) -> std::result::Result<Value, String> {
+        if method != "tools/call" {
+            return Err(format!("{method}: PdfCraft answers tools/call"));
+        }
+        self.activate(doc).map_err(|e| e.to_string())?;
+        let name = params.get("name").and_then(Value::as_str).ok_or("missing `name`")?.to_string();
+        let mut args = params.get("arguments").cloned().filter(Value::is_object).unwrap_or(json!({}));
+        let takes_doc =
+            pdfcraft_automation::tools().iter().find(|t| t.name == name).is_some_and(|t| t.input_schema["properties"].get("doc").is_some());
+        if takes_doc && let Some(o) = args.as_object_mut() {
+            o.entry("doc").or_insert(json!(doc.0));
+        }
+        let server = self.tools.get_or_insert_with(|| pdfcraft_automation::mcp::McpServer::new(pdfcraft_automation::Automation::new()));
+        let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": name, "arguments": args}});
+        server.automation_mut().swap_session(&mut self.app.session);
+        let reply = server.handle(&msg);
+        server.automation_mut().swap_session(&mut self.app.session);
+        match reply {
+            Some(r) => match (r.get("result"), r.get("error")) {
+                (Some(v), _) => Ok(v.clone()),
+                (_, Some(e)) => Err(e["message"].as_str().unwrap_or("error").to_string()),
+                _ => Err("no answer".into()),
+            },
+            None => Err("no answer".into()),
+        }
     }
 
     fn native_menus(&self, ctx: &egui::Context) -> Option<craft_menu::MenuBar> {

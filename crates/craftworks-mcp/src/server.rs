@@ -165,6 +165,8 @@ pub struct Server {
     live: Option<LiveClient>,
     headless: Headless,
     pdf: pdfcraft_automation::mcp::McpServer,
+    /// PDFs opened headless by `file`, and their document ids there.
+    pdf_docs: HashMap<PathBuf, u64>,
     index: Option<Indexer>,
     /// Every tool, and which ones only read.
     tools: Vec<Value>,
@@ -186,6 +188,7 @@ impl Server {
             live: None,
             headless: Headless::default(),
             pdf,
+            pdf_docs: HashMap::new(),
             index: None,
             tools: Vec::new(),
             reads: Vec::new(),
@@ -239,6 +242,7 @@ impl Server {
         // PdfCraft's own tools; its paths are confined to the project by its own root.
         let listed = self.pdf.handle(&json!({"jsonrpc": "2.0", "id": 0, "method": "tools/list"}));
         let pdf_tools = listed.and_then(|v| v["result"]["tools"].as_array().cloned()).unwrap_or_default();
+        let pdf_file = json!({"type": "string", "description": "A PDF in the project, relative to its folder: the tool works on it (live in its tab when it's open in Craftworks). Instead of `doc`."});
         for mut t in pdf_tools {
             let Some(name) = t.get("name").and_then(Value::as_str).map(str::to_string) else { continue };
             let full = format!("pdf.{name}");
@@ -246,6 +250,16 @@ impl Server {
                 reads.push(full.clone());
             }
             t["name"] = json!(full);
+            // Tools on one document also take `file`, so they can reach an open tab.
+            let takes_doc = t["inputSchema"]["properties"].get("doc").is_some();
+            if takes_doc && let Some(schema) = t.get_mut("inputSchema").and_then(Value::as_object_mut) {
+                if let Some(props) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+                    props.insert("file".into(), pdf_file.clone());
+                }
+                if let Some(req) = schema.get_mut("required").and_then(Value::as_array_mut) {
+                    req.retain(|x| x != "doc");
+                }
+            }
             tools.push(t);
         }
         self.tools = tools;
@@ -579,6 +593,58 @@ impl Server {
         if tool.contains("save") && self.permission() != Permission::EditSave {
             return error_result("Saving needs the project's edit_save permission.");
         }
+        let mut args = args.clone();
+        // By `file`: live in its tab when it's open (H7), else opened headless once.
+        if let Some(file) = args.get("file").and_then(Value::as_str).map(str::to_string) {
+            let path = match self.jail.resolve(&file) {
+                Ok(p) => p,
+                Err(e) => return error_result(e),
+            };
+            if Kind::for_path(&path) != Some(Kind::Pdf) {
+                return error_result(format!("{file} isn't a PDF"));
+            }
+            if let Some(o) = args.as_object_mut() {
+                o.remove("file");
+                o.remove("doc");
+            }
+            let edit = self.is_edit(full, &args);
+            let mut live = self.open_in_window(&path);
+            if !live && edit && self.permission() == Permission::Edit {
+                if self.window().is_none() {
+                    return error_result(
+                        "Edits need the user's review: open Craftworks (the edit then happens in its window), or set the project's permission to edit_save.",
+                    );
+                }
+                live = self.open_and_wait(&path);
+            }
+            if live && let Some(w) = self.window() {
+                let params = json!({"name": tool, "arguments": args});
+                return match w.request("call", json!({"path": path.to_string_lossy(), "method": "tools/call", "params": params})) {
+                    Ok(r) => r,
+                    Err(e) => error_result(e),
+                };
+            }
+            let id = match self.pdf_docs.get(&path) {
+                Some(id) => *id,
+                None => {
+                    let open = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "doc_open", "arguments": {"path": path.to_string_lossy()}}});
+                    let r = self.pdf.handle(&open).unwrap_or_default();
+                    let id = r["result"]["structuredContent"]["doc"].as_u64().or_else(|| r["result"]["structuredContent"]["id"].as_u64());
+                    match id {
+                        Some(id) => {
+                            self.pdf_docs.insert(path.clone(), id);
+                            id
+                        }
+                        None => {
+                            return error_result(format!("couldn't open {file}: {}", r["result"]["content"][0]["text"].as_str().unwrap_or("error")));
+                        }
+                    }
+                }
+            };
+            if let Some(o) = args.as_object_mut() {
+                o.insert("doc".into(), json!(id));
+            }
+        }
         let msg = json!({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": tool, "arguments": args}});
         match self.pdf.handle(&msg) {
             Some(r) => match (r.get("result"), r.get("error")) {
@@ -681,6 +747,7 @@ impl Server {
             self.headless.word.remove(&path);
             self.headless.sheet.remove(&path);
             self.headless.deck.remove(&path);
+            self.pdf_docs.remove(&path);
             text_result(format!("{f} is open in Craftworks; edits to it now happen live in its tab."))
         } else {
             error_result(format!("{f} didn't open"))

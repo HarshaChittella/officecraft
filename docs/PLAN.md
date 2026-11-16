@@ -327,7 +327,7 @@ Tasks
 
 Done when: with only this server connected, Claude Code completes the three brief scenarios, and in scenario 1 the open `report.docx` tab changes live and the change can be undone.
 
-**Result so far (2026-11-16): 7.1–7.6 done; 7.7 (live PDF edits, H7) and the run with Claude Code itself are open.** Setup and use are in `docs/ai.md`.
+**Result (2026-11-16): 7.1–7.7 done; the run with Claude Code itself is yours.** Setup and use are in `docs/ai.md`.
 - **7.1–7.2** `crates/craftworks-mcp`:
   - one MCP server (JSON-RPC over stdio, no new dependency);
   - WordCraft's, GridCraft's and DeckCraft's own tools prefixed `doc.`, `sheet.`, `deck.`, each with a `file` argument;
@@ -346,9 +346,14 @@ Done when: with only this server connected, Claude Code completes the three brie
 - **7.5:** the same binary is the CLI: `craftworks mcp --project DIR [--all-tools]` and `craftworks open FILE…` (D43). There's no separate `apps/craftworks-cli`.
 - **7.6:** `scripts/ai-scenarios.py` runs the brief's three scenarios through the real binary with fixture files the connector makes itself: **9/9 pass**. Scenario 1 has a real window with `report.docx` open: the table appears in the tab, the `edit` project doesn't save it, and Undo takes it back. `--check` has an AI stage (a stand-in AI on its own thread, through the real connector): read the sheet, write a table into the open document, nothing saved after 4 s, the review panel lists it, its Undo takes it back. Screenshot `ai-review-*.png`.
 - **Tests:** 71 `--check` checks pass in light and dark; 107 tests pass, plus 2 ignored.
-- **Left:**
-  - 7.7, live PDF edits (an upstream PdfCraft hook, H7).
-  - Your run with Claude Code (`docs/ai.md` has the one-line setup).
+- **7.7, live PDF edits (H7):**
+  - **The hook:** a small upstream change in the PdfCraft fork (`craftworks/hosted`, `2bd8bd08c`). `Automation::swap_session` lets a host lend its session to PdfCraft's tools for one call, and `McpServer::automation_mut` reaches it. It has a test in PdfCraft's own suite (65/65 pass).
+  - **The adapter:** the PDF adapter's `Editor::control` runs `tools/call` on the open documents with the tab's session lent.
+  - **The tools:** `pdf.*` tools take `file`. When that PDF is open, the edit happens in its tab; under `edit`, an edit opens it there for review.
+  - **Proven by:** a core test (rotate live, dirty, PdfCraft's Undo restores), a `--check` stage (review panel Undo) and two more scenario-script checks (11/11 pass).
+- **The check run** no longer stalls if a wake-up is lost while it measures idle CPU: the timing thread keeps asking for a frame until its result is read. That was the occasional hang in Phases 5–7.
+- 74 `--check` checks pass in light and dark; 108 tests pass, plus 2 ignored.
+- **Left:** your run with Claude Code (`docs/ai.md` has the one-line setup).
 
 ## Phase 8: Polish and ship
 

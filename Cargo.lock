@@ -1708,6 +1708,7 @@ dependencies = [
  "gridcraft-mcp",
  "gridcraft-ui-egui",
  "log",
+ "pdfcraft-automation",
  "pdfcraft-engine",
  "pdfcraft-render",
  "pdfcraft-ui-egui",

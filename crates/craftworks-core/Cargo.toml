@@ -21,6 +21,7 @@ pdfcraft-render.workspace = true
 wordcraft-mcp.workspace = true
 gridcraft-mcp.workspace = true
 deckcraft-mcp.workspace = true
+pdfcraft-automation.workspace = true
 craft-menu = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0" }
 craft-keymap = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0", default-features = false }
 egui.workspace = true

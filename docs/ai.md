@@ -37,7 +37,7 @@ and `tool_search` and `tool_call` reach the rest.
 - `project_open`: opens a file in a Craftworks tab.
 - `project_save`: saves a file the AI edited, if the project allows it.
 - `doc.*`, `sheet.*`, `deck.*`: WordCraft's, GridCraft's and DeckCraft's own tools. Each takes `file`, a path in the project.
-- `pdf.*`: PdfCraft's own tools, with paths confined to the project.
+- `pdf.*`: PdfCraft's own tools, with paths confined to the project. Give them `file` to work on a PDF by its path; when it's open in Craftworks, the edit happens live in its tab.
 
 ## Live edits and review
 
@@ -67,10 +67,6 @@ Set per project in `.craftworks/project.json`, as `"ai": {"permission": …}`:
 
 - Every path the AI names stays inside the project folder: `..`, absolute paths elsewhere and links that lead out are refused.
 - The window and the server talk over a Unix socket in Craftworks' settings folder. Each launch writes a new random token there that only you can read (mode 0600), and a request without it is refused.
-
-## Not yet
-
-- **Live edits to open PDFs:** they come with an upstream PdfCraft hook (H7). Until then, PDFs are edited headless and saved only with `edit_save`.
 
 ## Testing it
 

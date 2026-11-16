@@ -7,7 +7,8 @@ acceptance is Claude Code doing the same with only this server connected (docs/a
     scripts/ai-scenarios.py [--binary target/measure/craftworks] [--dir plan/ai-e2e] [--no-window]
 
 1. Read the Q3 figures from budget.xlsx and write them into a table in report.docx while it's
-   open in a Craftworks tab: the tab changes live, and Undo takes the change back.
+   open in a Craftworks tab: the tab changes live, and Undo takes the change back. The same for
+   an open PDF (H7): a page rotated live by PdfCraft's own tool, then undone.
 2. Build a deck from report.docx.
 3. Compare the amounts in contract.pdf with payments.xlsx.
 
@@ -137,6 +138,15 @@ def main():
         text = json.dumps(m.tool("doc.inspect_document", file="report.docx"))
         check("1350" not in text, "Undo takes the table back")
         m.tool("doc.execute", file="report.docx", command="edit.redo", params={})
+        # H7: an open PDF, edited live by PdfCraft's own tools, and undone.
+        m.tool("project_open", file="contract.pdf")
+        rot = lambda: m.tool("pdf.doc_info", file="contract.pdf")["pages"][0]["rotation"]
+        before = rot()
+        m.tool("pdf.page_rotate", file="contract.pdf", pages=[1], degrees=90)
+        after = rot()
+        check(after == (before + 90) % 360, f"contract.pdf, open in a tab, is rotated live by PdfCraft's tool ({before}° → {after}°)")
+        m.tool("pdf.edit_undo", file="contract.pdf")
+        check(rot() == before, "and PdfCraft's Undo takes it back")
     else:
         print("SKIP the live part of scenario 1 (--no-window)")
     m.close()

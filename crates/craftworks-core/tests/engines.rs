@@ -417,8 +417,31 @@ fn live_requests_edit_the_open_document_and_undo() {
     frames(&ctx, ed.as_mut(), 1);
     let inspect = ed.control(doc, "engine.execute", json!({"command": "slide.inspect", "params": {}})).unwrap().to_string();
     assert!(!inspect.contains("From the AI"), "DeckCraft's Undo takes it back");
+}
 
-    // PdfCraft: not live yet (H7).
-    let mut ed = new_editor(Kind::Pdf);
-    assert!(ed.control(DocId(1), "document.inspect", json!({})).is_err());
+/// H7: a live request runs PdfCraft's own tool on the open PDF; the view's document changes
+/// and PdfCraft's Undo takes it back.
+#[test]
+fn live_tool_calls_edit_the_open_pdf_and_undo() {
+    let dir = scratch("pdf-live");
+    let path = dir.join("live.pdf");
+    let bytes = pdfcraft_engine::Session::new().create_from_text("Live", "Page one").unwrap();
+    std::fs::write(&path, bytes.as_slice()).unwrap();
+    let ctx = egui::Context::default();
+    let mut ed = PdfEditor::new();
+    let doc = open_pdf(&ctx, &mut ed, &path);
+    let rotation = |ed: &mut PdfEditor| {
+        let r = ed.control(doc, "tools/call", json!({"name": "doc_info", "arguments": {}})).unwrap();
+        r["structuredContent"]["pages"][0]["rotation"].as_i64()
+    };
+    assert_eq!(rotation(&mut ed), Some(0));
+    let r = ed.control(doc, "tools/call", json!({"name": "page_rotate", "arguments": {"pages": [1], "degrees": 90}})).unwrap();
+    assert_ne!(r["isError"], json!(true), "{r}");
+    frames(&ctx, &mut ed, 2);
+    assert_eq!(rotation(&mut ed), Some(90), "the open document is rotated");
+    assert!(info(&ed, doc).dirty, "and has unsaved changes in its tab");
+    ed.run_command("edit.undo", json!({})).unwrap();
+    frames(&ctx, &mut ed, 2);
+    assert_eq!(rotation(&mut ed), Some(0), "PdfCraft's Undo takes the AI's edit back");
+    assert!(ed.control(doc, "document.inspect", json!({})).is_err(), "PdfCraft answers tools/call only");
 }

@@ -73,6 +73,8 @@ pub struct Check {
     since: Option<f64>,
     /// The stand-in AI's tool results, from its own thread.
     ai_rx: Option<std::sync::mpsc::Receiver<serde_json::Value>>,
+    /// The open PDF's first-page rotation before the AI's edit.
+    pdf_rotation: Option<i64>,
     wakes: std::collections::BTreeMap<String, u64>,
     resize_worst: f64,
     /// Mean luminance (0–1) of each tab's engine area, from its screenshot.
@@ -103,6 +105,7 @@ impl Check {
             settle_until: None,
             since: None,
             ai_rx: None,
+            pdf_rotation: None,
             wakes: Default::default(),
             resize_worst: 0.0,
             luminance: Arc::new(Mutex::new(Vec::new())),
@@ -955,16 +958,83 @@ impl Check {
                         app.ai.review_open = false;
                         self.wait = 6;
                     }
-                    _ => {
+                    4 => {
                         let text = Self::tab_of(app, Kind::Document)
                             .and_then(|(_, d)| app.engine(Kind::Document).editor_mut().control(d, "document.inspect", json!({})).ok())
                             .map(|v| v.to_string())
                             .unwrap_or_default();
                         self.check(!text.contains("Midlands") && app.ai.changed.is_empty(), "Undo in the review panel takes the AI's table back");
+                        // H7: an open PDF, edited live through PdfCraft's own tools.
+                        self.pdf_rotation = Self::tab_of(app, Kind::Pdf)
+                            .and_then(|(_, d)| {
+                                app.engine(Kind::Pdf).editor_mut().control(d, "tools/call", json!({"name": "doc_info", "arguments": {}})).ok()
+                            })
+                            .and_then(|v| v["structuredContent"]["pages"][0]["rotation"].as_i64());
+                        let (tx, rx) = std::sync::mpsc::channel();
+                        self.ai_rx = Some(rx);
+                        let settings = dir.join("settings");
+                        std::thread::spawn(move || {
+                            let r = match craftworks_mcp::Server::new(&dir, true) {
+                                Ok(s) => {
+                                    let mut s = s.with_settings_dir(&settings);
+                                    s.call(
+                                        "tool_call",
+                                        &json!({"name": "pdf.page_rotate", "arguments": {"file": "Contract.pdf", "pages": [1], "degrees": 90}}),
+                                    )
+                                }
+                                Err(e) => json!({"error": e}),
+                            };
+                            let _ = tx.send(r);
+                        });
+                    }
+                    5 => {
+                        let got = self.ai_rx.as_ref().and_then(|r| r.try_recv().ok());
+                        let Some(r) = got else {
+                            if self.still_waiting(ctx, 30.0) {
+                                return;
+                            }
+                            self.done_waiting();
+                            self.check(false, "the AI connector answered for the PDF");
+                            self.stage = Stage::DirtyClose { phase: 0 };
+                            return;
+                        };
+                        self.done_waiting();
+                        let rotation = |app: &mut App| {
+                            Self::tab_of(app, Kind::Pdf)
+                                .and_then(|(_, d)| {
+                                    app.engine(Kind::Pdf).editor_mut().control(d, "tools/call", json!({"name": "doc_info", "arguments": {}})).ok()
+                                })
+                                .and_then(|v| v["structuredContent"]["pages"][0]["rotation"].as_i64())
+                        };
+                        let rot = rotation(app);
+                        let want = self.pdf_rotation.map(|b| (b + 90) % 360);
+                        self.check(
+                            r["isError"] != json!(true) && rot.is_some() && rot == want,
+                            format!("the AI rotates a page of the open PDF, live in its tab (H7; {:?}° → {rot:?}°)", self.pdf_rotation),
+                        );
+                        let listed = app.ai.changed.iter().any(|c| c.path.ends_with("Contract.pdf"));
+                        self.check(listed, "the review panel lists the PDF");
+                        let p = app.ai.changed.iter().find(|c| c.path.ends_with("Contract.pdf")).map(|c| c.path.clone());
+                        if let Some(p) = p {
+                            app.on_review(craftworks_shell::ai::ReviewAction::Undo(p));
+                        }
+                        self.wait = 6;
+                    }
+                    6 => {
+                        let rot = Self::tab_of(app, Kind::Pdf)
+                            .and_then(|(_, d)| {
+                                app.engine(Kind::Pdf).editor_mut().control(d, "tools/call", json!({"name": "doc_info", "arguments": {}})).ok()
+                            })
+                            .and_then(|v| v["structuredContent"]["pages"][0]["rotation"].as_i64());
+                        self.check(
+                            rot.is_some() && rot == self.pdf_rotation,
+                            format!("Undo in the review panel takes the PDF edit back (rotation {rot:?})"),
+                        );
                         self.stage = Stage::DirtyClose { phase: 0 };
                         self.wait = 5;
                         return;
                     }
+                    _ => {}
                 }
                 self.stage = Stage::Ai { phase: phase + 1 };
             }
@@ -1170,7 +1240,15 @@ impl Check {
                     if let Ok(mut g) = slot.lock() {
                         *g = Some(pct);
                     }
-                    waker.request_repaint();
+                    // Ask for a frame until the result is read: one lost wake-up (the window
+                    // is in the background, and macOS may defer it) must not stall the run.
+                    for _ in 0..240 {
+                        waker.request_repaint();
+                        std::thread::sleep(Duration::from_millis(500));
+                        if slot.lock().map_or(true, |g| g.is_none()) {
+                            break;
+                        }
+                    }
                 });
                 self.stage = Stage::Idle { started: true, focused };
                 self.idle_frames = app.frames;
