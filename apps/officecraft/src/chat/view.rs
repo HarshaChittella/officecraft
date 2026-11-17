@@ -348,7 +348,7 @@ impl ChatPanel {
                     ui.label(RichText::new(name).font(text::card()).color(p.text));
                     ui.add(
                         egui::TextEdit::multiline(text_)
-                            .id(Id::new(("cw_memory_note", i)))
+                            .id(ui.scope_id().with(("cw_memory_note", i)))
                             .font(text::body())
                             .desired_width(ui.available_width())
                             .desired_rows(3),
@@ -536,7 +536,7 @@ fn review_card(ui: &mut Ui, p: &Palette, root: Option<&std::path::Path>, changed
             let g = ui.painter().layout_job(job);
             let name_r = Rect::from_min_size(pos2(name_left, row.center().y - g.size().y / 2.0), g.size());
             ui.painter().galley(name_r.min, g, p.text);
-            ui.interact(name_r, Id::new(("cw_chat_changed", &c.path)), Sense::hover())
+            ui.interact(name_r, ui.scope_id().with(("cw_chat_changed", &c.path)), Sense::hover())
                 .on_hover_text(format!("{name}: {} change{}", c.edits, if c.edits == 1 { "" } else { "s" }));
         }
         if changed.len() > 1 {

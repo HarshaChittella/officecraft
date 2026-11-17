@@ -42,6 +42,7 @@ impl Memory {
         Memory { dir: root.join(officecraft_core::project::DIR).join("memory") }
     }
 
+    #[cfg(test)]
     pub fn dir(&self) -> &Path {
         &self.dir
     }

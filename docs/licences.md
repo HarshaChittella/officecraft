@@ -546,12 +546,12 @@ Fonts, icons and data the four Craft repos bundle, as each credits them:
 | objc2-uniform-type-identifiers | 0.2.2 | MIT | crates.io |
 | objc2-user-notifications | 0.2.2 | MIT | crates.io |
 | ocrs | 0.13.1 | MIT OR Apache-2.0 | crates.io |
-| officecraft | 0.1.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
-| officecraft-core | 0.1.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
-| officecraft-mcp | 0.1.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
-| officecraft-platform | 0.1.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
-| officecraft-render | 0.1.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
-| officecraft-shell | 0.1.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
+| officecraft | 0.2.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
+| officecraft-core | 0.2.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
+| officecraft-mcp | 0.2.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
+| officecraft-platform | 0.2.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
+| officecraft-render | 0.2.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
+| officecraft-shell | 0.2.0 | MIT OR Apache-2.0 | this workspace / vendored Craft repo |
 | once_cell | 1.21.4 | MIT OR Apache-2.0 | crates.io |
 | oneshot | 0.2.1 | MIT OR Apache-2.0 | crates.io |
 | openssl-probe | 0.2.2 | MIT OR Apache-2.0 | crates.io |
