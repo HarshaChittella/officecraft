@@ -1563,7 +1563,37 @@ impl Check {
                         self.screenshot(ctx, "ask-ai");
                         self.wait = 90;
                     }
+                    2 => {
+                        // Stage 2: a change made, one waiting for "allow edits?", and the review.
+                        app.chat.end_preview();
+                        let root = app.projects.current_item().map(|i| i.root).unwrap_or_else(|| self.dir.clone());
+                        let mut chat = crate::chat::store::Chat::new(0);
+                        chat.messages = vec![
+                            serde_json::json!({"role": "user", "content": [{"type": "text", "text": "Make a one-page summary of the Q3 report as a new document"}]}),
+                            serde_json::json!({"role": "assistant", "content": [
+                                {"type": "tool_use", "id": "t1", "name": "project_read", "input": {"file": "Q3 report.docx"}},
+                                {"type": "tool_use", "id": "t2", "name": "project_new", "input": {"file": "Q3 summary.docx"}},
+                                {"type": "tool_use", "id": "t3", "name": "tool_call", "input": {"name": "doc.insert_text", "arguments": {"file": "Q3 summary.docx", "text": "…"}}},
+                            ]}),
+                            serde_json::json!({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "…"}, {"type": "tool_result", "tool_use_id": "t2", "content": "…"}, {"type": "tool_result", "tool_use_id": "t3", "content": "…"}]}),
+                            serde_json::json!({"role": "assistant", "content": [
+                                {"type": "text", "text": "I made **Q3 summary.docx** [[Q3 summary.docx]]: a title, four key points and the revenue table. Keep it below to save it."},
+                            ]}),
+                            serde_json::json!({"role": "user", "content": [{"type": "text", "text": "Add the regional totals to the budget too"}]}),
+                        ];
+                        app.chat.show_preview(chat, root.clone());
+                        app.chat.preview_ask("Write range · Budget.xlsx");
+                        let canon = root.canonicalize().unwrap_or(root);
+                        app.ai.changed.push(officecraft_shell::ai::Changed { path: canon.join("Q3 summary.docx"), kind: Kind::Document, edits: 3 });
+                        self.wait = 90;
+                    }
+                    3 => {
+                        self.check(app.chat.open && !app.ai.changed.is_empty(), "Ask AI asks before a change and shows changes to keep or undo");
+                        self.screenshot(ctx, "ask-ai-do");
+                        self.wait = 90;
+                    }
                     _ => {
+                        app.ai.changed.clear();
                         app.chat.end_preview();
                         self.stage = Stage::Quit { phase: 0 };
                         self.wait = 5;

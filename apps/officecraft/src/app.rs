@@ -14,6 +14,7 @@ use officecraft_shell::{
 use egui::{Event, Rect, Stroke, pos2};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use officecraft_core::project::Permission;
 use std::time::Duration;
 
 /// How often an engine that isn't shown runs `logic` while it has work pending (D4).
@@ -1419,6 +1420,17 @@ impl App {
                 self.chat.send(ctx, &note);
             }
             PanelAction::OpenProject => self.pending_open_project = true,
+            PanelAction::AllowEdits => {
+                let allowed = match self.chat.root().map(Path::to_path_buf) {
+                    Some(root) => self.projects.set_ai_permission(&root, Permission::Edit),
+                    None => Err("no project".into()),
+                };
+                if let Err(e) = &allowed {
+                    self.toasts.error(format!("Couldn't allow edits: {e}"));
+                }
+                self.chat.answer(allowed.is_ok());
+            }
+            PanelAction::Review(r) => self.on_review(r),
             PanelAction::OpenSource { file, at } => {
                 let Some(root) = self.projects.current_item().map(|i| i.root) else { return };
                 // Only files inside the project open from a source.
@@ -1457,6 +1469,13 @@ impl App {
         let items = self.tab_items();
         let front = (!self.newtab.open).then(|| self.tabs.active().map(|t| t.id.0)).flatten().and_then(|id| items.iter().find(|t| t.id == id));
         let mut note = String::from("Note from OfficeCraft: ");
+        if let Some(perm) = root.as_deref().and_then(|r| self.projects.owner_of(r)).map(|p| p.settings.ai_permission) {
+            note += match perm {
+                Permission::Read => "the project lets you only read (a change asks the person first). ",
+                Permission::Edit => "the project lets you change files; the person keeps or undoes each change. ",
+                Permission::EditSave => "the project lets you change and save files. ",
+            };
+        }
         match front {
             Some(t) => note += &format!("in front is {}.", describe(t)),
             None => note += "Home is in front; no document is.",
@@ -1896,6 +1915,10 @@ impl eframe::App for App {
         // Ask AI, at the right; it slides in and out like the sidebar.
         {
             let name = self.projects.current_item().map(|i| i.name);
+            // The changes waiting for review in the panel's project.
+            let root = self.chat.root().map(|r| r.canonicalize().unwrap_or_else(|_| r.to_path_buf()));
+            let changed: Vec<officecraft_shell::ai::Changed> =
+                self.ai.changed.iter().filter(|c| root.as_ref().is_some_and(|r| c.path.starts_with(r))).cloned().collect();
             let chat = &mut self.chat;
             let open = chat.open;
             let mut expanded = open;
@@ -1905,7 +1928,7 @@ impl eframe::App for App {
                 .size_range(300.0..=640.0)
                 .show_separator_line(false)
                 .frame(egui::Frame::NONE.fill(p.surface))
-                .show_collapsible(ui, &mut expanded, |ui| chat.view(ui, &p, name.as_deref()))
+                .show_collapsible(ui, &mut expanded, |ui| chat.view(ui, &p, name.as_deref(), &changed))
                 .map(|r| r.inner)
                 .unwrap_or_default();
             for a in acts.into_iter().filter(|_| open) {

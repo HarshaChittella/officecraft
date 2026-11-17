@@ -1,6 +1,7 @@
 # Ask AI: a chat built into OfficeCraft
 
-Status: **stage 1 (Ask) built 2026-11-17** (`apps/officecraft/src/chat/`); stages 2–4 not yet.
+Status: **stage 1 (Ask) and stage 2 (Do) built 2026-11-17** (`apps/officecraft/src/chat/`);
+stages 3–4 not yet.
 
 **Stage 1 as built:** the **Ask AI** button in the title row opens the panel at the right. With a
 project open and a credential set up, you ask; Claude (Opus 5.5, effort medium) reads and searches
@@ -12,6 +13,25 @@ one, and removes the key. The credential is, first match wins: `ANTHROPIC_API_KE
 the panel (macOS Keychain, service "OfficeCraft"); or the `ant` sign-in when chosen in the panel
 (a token from `ant auth print-credentials --access-token`, billed to the Console organization).
 A question that gets no answer goes back into the box.
+
+**Stage 2 as built:** Ask AI also changes files and makes new ones. It has the connector's compact
+tool list (the project tools, the core `doc.`/`sheet.`/`deck.` tools, and `tool_search` /
+`tool_call` for every other app tool, PDFs included), plus `project_new`, a new connector tool that
+makes a blank .docx, .xlsx, .pptx or .pdf in the project and opens it. Changes go through the
+project's permission, as for Claude Desktop:
+
+- **read** (a new project's default): the first change in a turn stops and asks in the panel,
+  "Allow changes to files?". **Allow Edits** sets the project to `edit` and the change runs; **Not
+  Now** (or Stop) refuses it, and the rest of that turn's changes, and Claude is told so.
+- **edit**: a change opens its file if needed and happens live in its tab (it comes to the front).
+  Nothing is saved: the panel's **Changes to review** card lists each changed file with **Keep**
+  (save) and **Undo** (the app's own undo, once per change), and **Keep All**; the same as the AI
+  pill's review. A file made with `project_new` exists on disk as a blank file; Undo takes back
+  what was written into it.
+- **edit_save**: Claude may also save, when asked.
+
+Each step shows in the conversation ("Made Q3 summary.docx", "Write range · Budget.xlsx"); the note
+sent with each question says what the project allows. A turn may take up to 40 rounds of tools.
 
 Goal: an **Ask AI** panel in the window that knows what you're looking at, answers from every
 file in the project, does things in your documents (with Keep/Undo), and remembers: the

@@ -1,11 +1,13 @@
 //! The Ask AI panel's drawing: a header with the chat menu, the conversation (your questions,
-//! Claude's answers with their sources as chips, what the tools did), and the box to ask in.
-//! Before a credential is set up, a card that sets one up.
+//! Claude's answers with their sources as chips, what the tools did), the question that allows
+//! edits, the changes waiting to be kept or undone, and the box to ask in. Before a credential is
+//! set up, a card that sets one up.
 
 use super::{ChatPanel, PanelAction, Seg, cite_label, engine, key, segments};
 use egui::{Align, CornerRadius, Id, Key, Layout, Modifiers, Rect, RichText, ScrollArea, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
+use officecraft_shell::ai::{Changed, ReviewAction};
 use officecraft_shell::icons;
-use officecraft_shell::tokens::{Palette, radius, space, text};
+use officecraft_shell::tokens::{Palette, radius, size, space, text};
 use officecraft_shell::widgets::{self, ButtonKind};
 use serde_json::Value;
 
@@ -18,11 +20,12 @@ pub fn key_id() -> Id {
 }
 
 /// Questions offered in an empty chat.
-const STARTERS: [&str; 3] = ["What's in this project?", "Summarise the document in front", "What changed between the reports?"];
+const STARTERS: [&str; 3] = ["What's in this project?", "Summarise the document in front", "Make a one-page summary of this project as a new document"];
 
 impl ChatPanel {
     /// Draws the panel into `ui` (the side panel's area).
-    pub fn view(&mut self, ui: &mut Ui, p: &Palette, project_name: Option<&str>) -> Vec<PanelAction> {
+    /// `changed`: the project's files with AI changes waiting to be kept or undone.
+    pub fn view(&mut self, ui: &mut Ui, p: &Palette, project_name: Option<&str>, changed: &[Changed]) -> Vec<PanelAction> {
         let mut out = Vec::new();
         let full = ui.max_rect();
         ui.painter().rect_filled(full, 0.0, p.surface);
@@ -51,7 +54,7 @@ impl ChatPanel {
         let list = Rect::from_min_max(body.min, pos2(body.right(), body.bottom() - composer_h - space::S));
         let composer = Rect::from_min_max(pos2(body.left(), body.bottom() - composer_h), body.max);
         let mut lui = ui.new_child(UiBuilder::new().max_rect(list).layout(Layout::top_down(Align::Min)));
-        self.conversation(&mut lui, p, &mut out);
+        self.conversation(&mut lui, p, changed, &mut out);
         let mut cui = ui.new_child(UiBuilder::new().max_rect(composer).layout(Layout::top_down(Align::Min)));
         self.composer(&mut cui, p, &mut out);
         out
@@ -174,14 +177,14 @@ impl ChatPanel {
         }
     }
 
-    fn conversation(&mut self, ui: &mut Ui, p: &Palette, out: &mut Vec<PanelAction>) {
+    fn conversation(&mut self, ui: &mut Ui, p: &Palette, changed: &[Changed], out: &mut Vec<PanelAction>) {
         let width = ui.available_width();
-        let empty = self.chat.as_ref().is_none_or(|c| c.messages.is_empty()) && self.running.is_none();
+        let empty = self.chat.as_ref().is_none_or(|c| c.messages.is_empty()) && self.running.is_none() && changed.is_empty();
         if empty {
             ui.add_space(space::XL);
             ui.label(RichText::new("Ask about the files in this project").font(text::card()).color(p.text));
             ui.label(
-                RichText::new("Claude reads and searches them to answer, and says where each answer came from. It knows which document is in front.")
+                RichText::new("Claude reads and searches them to answer, and says where each answer came from. It can change them and make new ones: you watch each change in its tab, then keep or undo it.")
                     .font(text::meta())
                     .color(p.text_muted),
             );
@@ -214,7 +217,10 @@ impl ChatPanel {
                         for b in m["content"].as_array().into_iter().flatten() {
                             match b["type"].as_str() {
                                 Some("text") => answer_text(ui, p, b["text"].as_str().unwrap_or_default(), out),
-                                Some("tool_use") => step_row(ui, p, &engine::step_label(b["name"].as_str().unwrap_or_default(), &b["input"]), false),
+                                Some("tool_use") => {
+                                    let (name, input) = (b["name"].as_str().unwrap_or_default(), &b["input"]);
+                                    step_row(ui, p, &engine::step_label(name, input), false, engine::is_change(name, input));
+                                }
                                 Some("fallback") => {
                                     ui.label(RichText::new("Another Claude model finished this answer.").font(text::meta()).italics().color(p.text_muted));
                                 }
@@ -230,12 +236,48 @@ impl ChatPanel {
                     answer_text(ui, p, &self.live, out);
                 }
                 let doing = self.step.clone().unwrap_or_else(|| if self.live.is_empty() { "Thinking…".into() } else { String::new() });
-                if !doing.is_empty() {
-                    step_row(ui, p, &doing, true);
+                if !doing.is_empty() && self.asking.is_none() {
+                    step_row(ui, p, &doing, true, false);
                 }
+            }
+            if let Some(what) = self.asking.clone() {
+                ui.add_space(space::S);
+                self.allow_card(ui, p, &what, project_label(self.root.as_deref()), out);
+            }
+            if !changed.is_empty() {
+                ui.add_space(space::S);
+                review_card(ui, p, self.root.as_deref(), changed, out);
             }
             self.show_notice(ui, p);
             ui.add_space(space::S);
+        });
+    }
+
+    /// "Allow Ask AI to change files?": the first change in a project that lets the AI only read.
+    fn allow_card(&mut self, ui: &mut Ui, p: &Palette, what: &str, project: String, out: &mut Vec<PanelAction>) {
+        card(ui, p, |ui| {
+            ui.horizontal(|ui| {
+                let (r, _) = ui.allocate_exact_size(vec2(16.0, 16.0), Sense::hover());
+                icons::sparkle(ui.painter(), r, egui::Color32::WHITE);
+                ui.label(RichText::new("Allow changes to files?").font(text::card()).color(p.text));
+            });
+            ui.label(RichText::new(format!("Claude wants to: {what}.")).font(text::body()).color(p.text));
+            ui.label(
+                RichText::new(format!(
+                    "Allowing lets Ask AI edit and make files in {project}. Each change shows in its tab and isn't saved until you keep it."
+                ))
+                .font(text::meta())
+                .color(p.text_muted),
+            );
+            ui.add_space(space::XS);
+            ui.allocate_ui_with_layout(vec2(ui.available_width(), size::CONTROL_H), Layout::right_to_left(Align::Center), |ui| {
+                if widgets::button(ui, p, "Allow Edits", ButtonKind::Primary, true).clicked() {
+                    out.push(PanelAction::AllowEdits);
+                }
+                if widgets::button(ui, p, "Not Now", ButtonKind::Secondary, true).clicked() {
+                    self.answer(false);
+                }
+            });
         });
     }
 
@@ -263,7 +305,7 @@ impl ChatPanel {
         }
         let field_r = Rect::from_min_max(box_r.min + vec2(space::S, space::S), box_r.max - vec2(40.0, space::S));
         let mut fui = ui.new_child(UiBuilder::new().max_rect(field_r).layout(Layout::top_down(Align::Min)));
-        let hint = if self.busy() { "Claude is answering…" } else { "Ask about this project…" };
+        let hint = if self.busy() { "Claude is working…" } else { "Ask, or say what to change…" };
         let field = fui.add(
             egui::TextEdit::multiline(&mut self.input)
                 .id(input_id())
@@ -312,18 +354,94 @@ fn user_bubble(ui: &mut Ui, p: &Palette, said: &str, width: f32) {
             .inner_margin(egui::Margin::symmetric(12, 8))
             .show(ui, |ui| {
                 ui.set_max_width(width * 0.82);
-                ui.label(RichText::new(said).font(text::body()).color(p.text));
+                // Wrapped and left-aligned inside the right-aligned bubble.
+                ui.with_layout(Layout::top_down(Align::Min), |ui| {
+                    ui.add(egui::Label::new(RichText::new(said).font(text::body()).color(p.text)).wrap());
+                });
             });
     });
 }
 
-/// A step the tools took, small and muted; `busy` with a spinner.
-fn step_row(ui: &mut Ui, p: &Palette, label: &str, busy: bool) {
+/// A raised card in the conversation.
+fn card(ui: &mut Ui, p: &Palette, add: impl FnOnce(&mut Ui)) {
+    egui::Frame::NONE
+        .fill(p.surface_raised)
+        .stroke(Stroke::new(1.0, p.border))
+        .corner_radius(CornerRadius::same(radius::CARD))
+        .inner_margin(egui::Margin::same(12))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing.y = space::XS;
+            add(ui);
+        });
+}
+
+/// The project's name for a sentence ("“Q3 Planning”"), or "this project".
+fn project_label(root: Option<&std::path::Path>) -> String {
+    root.and_then(|r| r.file_name()).map_or_else(|| "this project".into(), |n| format!("“{}”", n.to_string_lossy()))
+}
+
+/// The files Claude changed, each kept (saved) or undone here.
+fn review_card(ui: &mut Ui, p: &Palette, root: Option<&std::path::Path>, changed: &[Changed], out: &mut Vec<PanelAction>) {
+    card(ui, p, |ui| {
+        let n: u32 = changed.iter().map(|c| c.edits).sum();
+        ui.label(RichText::new("Changes to review").font(text::card()).color(p.text));
+        ui.label(
+            RichText::new(format!(
+                "{n} change{} in {} file{}. Keep saves a file; Undo takes its changes back.",
+                if n == 1 { "" } else { "s" },
+                changed.len(),
+                if changed.len() == 1 { "" } else { "s" }
+            ))
+            .font(text::meta())
+            .color(p.text_muted),
+        );
+        ui.add_space(space::XS);
+        for c in changed {
+            let name = root
+                .and_then(|r| c.path.strip_prefix(r.canonicalize().unwrap_or_else(|_| r.to_path_buf())).ok().or_else(|| c.path.strip_prefix(r).ok()))
+                .map_or_else(|| c.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(), |r| r.to_string_lossy().into_owned());
+            // Laid out by hand: the icon, the name cut to fit, then Undo and Keep at the right.
+            let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), size::CONTROL_H), Sense::hover());
+            icons::kind(ui.painter(), Rect::from_center_size(pos2(row.left() + 9.0, row.center().y), vec2(18.0, 18.0)), c.kind, egui::Color32::WHITE);
+            let kw = widgets::button_width(ui, "Keep");
+            let uw = widgets::button_width(ui, "Undo");
+            let keep = Rect::from_min_size(pos2(row.right() - kw, row.top()), vec2(kw, size::CONTROL_H));
+            let undo = Rect::from_min_size(pos2(keep.left() - space::S - uw, row.top()), vec2(uw, size::CONTROL_H));
+            if widgets::button_at(ui, p, keep, "Keep", ButtonKind::Primary, true).on_hover_text(format!("Save {name}")).clicked() {
+                out.push(PanelAction::Review(ReviewAction::Keep(c.path.clone())));
+            }
+            if widgets::button_at(ui, p, undo, "Undo", ButtonKind::Secondary, true).on_hover_text("Take Claude's changes back").clicked() {
+                out.push(PanelAction::Review(ReviewAction::Undo(c.path.clone())));
+            }
+            let name_left = row.left() + 18.0 + space::S;
+            let mut job = egui::text::LayoutJob::simple_singleline(name.clone(), text::body(), p.text);
+            job.wrap = egui::text::TextWrapping::truncate_at_width((undo.left() - space::S - name_left).max(20.0));
+            let g = ui.painter().layout_job(job);
+            let name_r = Rect::from_min_size(pos2(name_left, row.center().y - g.size().y / 2.0), g.size());
+            ui.painter().galley(name_r.min, g, p.text);
+            ui.interact(name_r, Id::new(("cw_chat_changed", &c.path)), Sense::hover())
+                .on_hover_text(format!("{name}: {} change{}", c.edits, if c.edits == 1 { "" } else { "s" }));
+        }
+        if changed.len() > 1 {
+            ui.allocate_ui_with_layout(vec2(ui.available_width(), size::CONTROL_H), Layout::right_to_left(Align::Center), |ui| {
+                if widgets::button(ui, p, "Keep All", ButtonKind::Secondary, true).clicked() {
+                    out.push(PanelAction::Review(ReviewAction::KeepAll));
+                }
+            });
+        }
+    });
+}
+
+/// A step the tools took, small and muted; `busy` with a spinner; `change` when it changed a file.
+fn step_row(ui: &mut Ui, p: &Palette, label: &str, busy: bool, change: bool) {
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(14.0, 14.0), Sense::hover());
         if busy {
             icons::spinner(ui.painter(), r, ui.input(|i| i.time), p.text_muted);
             ui.ctx().request_repaint();
+        } else if change {
+            icons::file(ui.painter(), r, p.accent);
         } else {
             icons::search(ui.painter(), r, p.text_faint);
         }

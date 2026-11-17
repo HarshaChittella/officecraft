@@ -1,7 +1,7 @@
 //! The MCP server (`officecraft mcp --project <dir>`): JSON-RPC over stdio.
 //!
 //! - Project tools: `project_files`, `project_search`, `project_read`, `project_open`,
-//!   `project_save`.
+//!   `project_new`, `project_save`.
 //! - Each app's own tools with a prefix (`doc.`, `sheet.`, `deck.`, `pdf.`) and a `file`
 //!   argument naming the project file they work on. A file open in the OfficeCraft window is
 //!   edited live in its tab (you watch it change, and Undo takes it back); any other file is
@@ -35,6 +35,7 @@ const CORE: &[&str] = &[
     "project_search",
     "project_read",
     "project_open",
+    "project_new",
     "project_save",
     "doc.execute",
     "doc.insert_table",
@@ -401,6 +402,7 @@ impl Server {
             "project_search" => self.project_search(args),
             "project_read" => self.project_read(args),
             "project_open" => self.project_open(args),
+            "project_new" => self.project_new(args),
             "project_save" => self.project_save(args),
             _ => match name.split_once('.') {
                 Some(("pdf", tool)) => self.pdf_call(name, tool, args),
@@ -440,7 +442,16 @@ impl Server {
         json_result(&json!({"tools": found}))
     }
 
-    fn is_edit(&self, name: &str, args: &Value) -> bool {
+    /// Whether running `name` with `args` would change a file (`tool_call` by what it runs;
+    /// opening a file to show it doesn't count).
+    pub fn is_edit(&self, name: &str, args: &Value) -> bool {
+        if name == TOOL_CALL {
+            let inner = args.get("name").and_then(Value::as_str).unwrap_or_default();
+            return self.is_edit(inner, args.get("arguments").unwrap_or(&json!({})));
+        }
+        if name == TOOL_SEARCH || name == "project_open" {
+            return false;
+        }
         if self.reads.iter().any(|r| r == name) {
             return false;
         }
@@ -780,6 +791,72 @@ impl Server {
         }
     }
 
+    /// Makes a new, blank file in the project (its kind from the extension), and opens it in the
+    /// window when OfficeCraft is running.
+    fn project_new(&mut self, args: &Value) -> Value {
+        if let Some(r) = self.refuse_edit() {
+            return r;
+        }
+        let Some(f) = args.get("file").and_then(Value::as_str) else { return error_result("project_new needs `file`") };
+        let path = match self.jail.resolve(f) {
+            Ok(p) => p,
+            Err(e) => return error_result(e),
+        };
+        if path.exists() {
+            return error_result(format!("{f} already exists: pick another name, or edit it with its own tools"));
+        }
+        let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+        if !["docx", "xlsx", "pptx", "pdf"].contains(&ext.as_str()) {
+            return error_result(format!("{f}: new files are .docx, .xlsx, .pptx or .pdf"));
+        }
+        if let Some(dir) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(dir)
+        {
+            return error_result(format!("{f}: {e}"));
+        }
+        let p = path.to_string_lossy().to_string();
+        let made = match ext.as_str() {
+            "docx" => {
+                let mut h = wordcraft_mcp::Headless::default();
+                wordcraft_mcp::tools::call_tool(&mut h, "save_document", &json!({"path": p})).to_value()
+            }
+            "xlsx" => {
+                let mut h = gridcraft_mcp::Headless::new();
+                gridcraft_mcp::call_tool(&mut h, "save_workbook", &json!({"path": p})).to_value()
+            }
+            "pptx" => {
+                let mut h = deckcraft_mcp::Headless::default();
+                let r = deckcraft_mcp::call_tool(&mut h, "new_presentation", &json!({})).to_value();
+                if r["isError"] == json!(true) {
+                    r
+                } else {
+                    deckcraft_mcp::call_tool(&mut h, "save_presentation", &json!({"path": p})).to_value()
+                }
+            }
+            _ => {
+                let letter = args.get("paper").and_then(Value::as_str).map(str::to_lowercase).as_deref() == Some("letter");
+                let (w, h) = if letter { (612.0, 792.0) } else { (595.28, 841.89) };
+                match pdfcraft_engine::Session::new().create_blank(w, h, 1) {
+                    Ok(bytes) => match std::fs::write(&path, bytes.as_slice()) {
+                        Ok(()) => json!({"content": []}),
+                        Err(e) => error_result(e.to_string()),
+                    },
+                    Err(e) => error_result(e.to_string()),
+                }
+            }
+        };
+        if made["isError"] == json!(true) || !path.exists() {
+            let _ = std::fs::remove_file(&path);
+            return error_result(format!("couldn't make {f}: {}", made["content"][0]["text"].as_str().unwrap_or("error")));
+        }
+        let rel = self.jail.relative(&path);
+        if self.window().is_some() && self.open_and_wait(&path) {
+            text_result(format!("Made {rel}, a blank file, and opened it in OfficeCraft: edit it with its own tools and `file` \"{rel}\"."))
+        } else {
+            text_result(format!("Made {rel}, a blank file: edit it with its own tools and `file` \"{rel}\"."))
+        }
+    }
+
     fn project_save(&mut self, args: &Value) -> Value {
         let Some(f) = args.get("file").and_then(Value::as_str) else { return error_result("project_save needs `file`") };
         let path = match self.jail.resolve(f) {
@@ -836,6 +913,12 @@ fn project_tools() -> Vec<Value> {
         json!({"name": "project_open", "title": "Open a file in OfficeCraft",
             "description": "Opens a file in an OfficeCraft tab, so the user sees it; edits to an open file happen live in its tab and can be undone there.",
             "inputSchema": {"type": "object", "properties": {"file": file}, "required": ["file"]}}),
+        json!({"name": "project_new", "title": "Make a new file",
+            "description": "Makes a new, blank document (.docx), sheet (.xlsx), presentation (.pptx) or PDF (.pdf) in the project, and opens it in OfficeCraft when it's running; then fill it with the file's own tools (doc.*, sheet.*, deck.*, pdf.*). Refuses a file that exists.",
+            "inputSchema": {"type": "object", "properties": {
+                "file": {"type": "string", "description": "The new file's path in the project, with its extension: .docx, .xlsx, .pptx or .pdf."},
+                "paper": {"type": "string", "enum": ["a4", "letter"], "description": "A PDF's page size (A4 unless said)."}},
+                "required": ["file"]}}),
         json!({"name": "project_save", "title": "Save a file",
             "description": "Saves the AI's edits to a file, if the project allows it (edit_save). Otherwise the user keeps or undoes them in OfficeCraft's review panel.",
             "inputSchema": {"type": "object", "properties": {"file": file}, "required": ["file"]}}),

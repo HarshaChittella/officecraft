@@ -44,7 +44,7 @@ fn headless_work_permissions_and_the_jail() {
     assert!(init["result"]["instructions"].as_str().unwrap().contains("edit and save"));
     let list = s.handle(&json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).unwrap();
     let names: Vec<&str> = list["result"]["tools"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect();
-    assert!(names.len() <= 14 && names.contains(&"tool_search") && names.contains(&"project_search"), "{names:?}");
+    assert!(names.len() <= 15 && names.contains(&"project_new") && names.contains(&"tool_search") && names.contains(&"project_search"), "{names:?}");
     assert!(s.handle(&json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).is_none(), "notifications get no answer");
 
     // A sheet made and saved headless; a document; a PDF.
@@ -165,4 +165,33 @@ fn frames(ctx: &egui::Context, ed: &mut dyn Editor, n: usize) {
         });
         out.textures_delta.clear();
     }
+}
+
+#[test]
+fn new_blank_files_of_each_kind_open_and_read() {
+    let root = scratch("new");
+    let settings = scratch("new-nowindow");
+    allow(&root, Permission::Read);
+    let mut s = Server::new(&root, false).unwrap().with_settings_dir(&settings);
+    assert!(s.is_edit("project_new", &json!({"file": "a.docx"})));
+    assert!(s.is_edit("tool_call", &json!({"name": "sheet.write_range", "arguments": {}})));
+    assert!(!s.is_edit("tool_call", &json!({"name": "project_read", "arguments": {}})));
+    assert!(!s.is_edit("project_open", &json!({"file": "a.docx"})));
+    assert!(err(&s.call("project_new", &json!({"file": "a.docx"}))).contains("read"), "read only refuses");
+
+    allow(&root, Permission::Edit);
+    for f in ["Notes/a.docx", "b.xlsx", "c.pptx", "d.pdf"] {
+        ok(&s.call("project_new", &json!({"file": f})));
+        assert!(root.join(f).is_file(), "{f} made");
+        ok(&s.call("project_read", &json!({"file": f})));
+    }
+    assert!(err(&s.call("project_new", &json!({"file": "b.xlsx"}))).contains("exists"));
+    assert!(err(&s.call("project_new", &json!({"file": "e.txt"}))).contains(".docx"));
+    assert!(s.call("project_new", &json!({"file": "../f.docx"}))["isError"] == json!(true));
+    // A new sheet takes edits headless once the project allows saving.
+    allow(&root, Permission::EditSave);
+    ok(&s.call("sheet.write_range", &json!({"file": "b.xlsx", "range": "A1", "values": [["Hi"]]})));
+    ok(&s.call("project_save", &json!({"file": "b.xlsx"})));
+    let read = ok(&s.call("project_read", &json!({"file": "b.xlsx"})));
+    assert!(read.to_string().contains("Hi"), "{read}");
 }

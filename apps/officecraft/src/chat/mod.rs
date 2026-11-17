@@ -1,7 +1,8 @@
-//! Ask AI (docs/ai-chat.md, stage 1): a chat panel at the right of the window that answers from
-//! the files of the project in front, knows which document you're looking at, cites where its
-//! answers came from, and keeps each chat with the project. It talks to Claude's API with your own
-//! key; the tools are the AI connector's, run in-process, and in this stage only read.
+//! Ask AI (docs/ai-chat.md, stages 1 and 2): a chat panel at the right of the window that answers
+//! from the files of the project in front, knows which document you're looking at, cites where its
+//! answers came from, changes files and makes new ones (live in their tabs, each change kept or
+//! undone by you), and keeps each chat with the project. It talks to Claude's API with your own
+//! key; the tools are the AI connector's, run in-process with the project's permission.
 
 pub mod api;
 pub mod engine;
@@ -15,7 +16,8 @@ use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
+use std::time::Duration;
 
 
 /// What the panel asks the app to do.
@@ -26,12 +28,18 @@ pub enum PanelAction {
     /// Open a cited file, at the place cited.
     OpenSource { file: String, at: Option<String> },
     OpenProject,
+    /// Let the AI edit files in the project (the panel's question was answered yes).
+    AllowEdits,
+    /// Keep or undo the AI's changes to a file.
+    Review(officecraft_shell::ai::ReviewAction),
 }
 
 /// A turn in progress.
 struct Running {
     cancel: Arc<AtomicBool>,
     rx: Receiver<Update>,
+    /// Answers to "allow edits?".
+    answers: Sender<bool>,
 }
 
 /// A job for the project's worker thread.
@@ -40,6 +48,7 @@ struct Job {
     cred: api::Credential,
     cancel: Arc<AtomicBool>,
     tx: Sender<Update>,
+    answers: Receiver<bool>,
     wake: egui::Context,
 }
 
@@ -68,11 +77,32 @@ impl Worker {
                     }
                     let Some(t) = tools.as_mut() else { continue };
                     let mut messages = job.messages;
-                    let (tx, wake) = (job.tx, job.wake);
-                    engine::run(&mut messages, t, &mut engine::Api(job.cred), &job.cancel, &mut |u| {
-                        let _ = tx.send(u);
-                        wake.request_repaint();
-                    });
+                    let (tx, wake, answers, cancel) = (job.tx, job.wake, job.answers, job.cancel);
+                    let ask_tx = tx.clone();
+                    let ask_wake = wake.clone();
+                    let mut ask = |label: &str| {
+                        let _ = ask_tx.send(Update::Ask(label.to_string()));
+                        ask_wake.request_repaint();
+                        // Waits for the person (Stop counts as no).
+                        loop {
+                            match answers.recv_timeout(Duration::from_millis(100)) {
+                                Ok(yes) => return yes,
+                                Err(RecvTimeoutError::Timeout) if !cancel.load(Ordering::Relaxed) => {}
+                                Err(_) => return false,
+                            }
+                        }
+                    };
+                    engine::run(
+                        &mut messages,
+                        t,
+                        &mut engine::Api(job.cred),
+                        &cancel,
+                        &mut |u| {
+                            let _ = tx.send(u);
+                            wake.request_repaint();
+                        },
+                        &mut ask,
+                    );
                 }
             })
             .ok()?;
@@ -93,6 +123,8 @@ pub struct ChatPanel {
     live: String,
     /// What the tools are doing now.
     step: Option<String>,
+    /// A change waiting for "allow edits?": what it is.
+    asking: Option<String>,
     running: Option<Running>,
     /// The last thing that went wrong.
     notice: Option<String>,
@@ -164,6 +196,21 @@ impl ChatPanel {
         if let Some(r) = &self.running {
             r.cancel.store(true, Ordering::Relaxed);
         }
+        self.asking = None;
+    }
+
+    /// Answers "allow edits?" (the app has set the project's permission first when yes).
+    pub fn answer(&mut self, yes: bool) {
+        if self.asking.take().is_some()
+            && let Some(r) = &self.running
+        {
+            let _ = r.answers.send(yes);
+        }
+    }
+
+    /// The project the panel follows.
+    pub fn root(&self) -> Option<&Path> {
+        self.root.as_deref()
     }
 
     fn save(&mut self) {
@@ -200,8 +247,9 @@ impl ChatPanel {
         // What's in front goes as a note from the app, not as something the person typed.
         chat.messages.push(json!({"role": "system", "content": front}));
         let (tx, rx) = channel();
+        let (answer_tx, answers) = channel();
         let cancel = Arc::new(AtomicBool::new(false));
-        let job = Job { messages: chat.messages.clone(), cred, cancel: cancel.clone(), tx, wake: ctx.clone() };
+        let job = Job { messages: chat.messages.clone(), cred, cancel: cancel.clone(), tx, answers, wake: ctx.clone() };
         if worker.jobs.send(job).is_err() {
             self.worker = None;
             self.notice = Some("Ask AI stopped working; try again.".into());
@@ -212,7 +260,8 @@ impl ChatPanel {
         self.notice = None;
         self.live.clear();
         self.step = None;
-        self.running = Some(Running { cancel, rx });
+        self.asking = None;
+        self.running = Some(Running { cancel, rx, answers: answer_tx });
         self.save();
     }
 
@@ -240,6 +289,7 @@ impl ChatPanel {
             match u {
                 Update::Text(t) => self.live.push_str(&t),
                 Update::Step(s) => self.step = Some(s),
+                Update::Ask(s) => self.asking = Some(s),
                 Update::Saved(messages) => {
                     if let Some(chat) = self.chat.as_mut() {
                         chat.messages = messages;
@@ -250,6 +300,7 @@ impl ChatPanel {
                 Update::Done(err) => {
                     self.running = None;
                     self.step = None;
+                    self.asking = None;
                     self.live.clear();
                     if let Some(e) = err {
                         self.notice = Some(e);
@@ -272,8 +323,16 @@ impl ChatPanel {
         self.open = true;
     }
 
+    /// Shows the "allow edits?" question in the preview.
+    pub fn preview_ask(&mut self, what: &str) {
+        if self.preview {
+            self.asking = Some(what.to_string());
+        }
+    }
+
     pub fn end_preview(&mut self) {
         self.preview = false;
+        self.asking = None;
         self.chat = None;
         self.root = None;
         self.open = false;
