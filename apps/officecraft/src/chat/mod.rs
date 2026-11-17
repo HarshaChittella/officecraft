@@ -7,6 +7,7 @@
 pub mod api;
 pub mod engine;
 pub mod key;
+pub mod memory;
 pub mod store;
 mod view;
 
@@ -134,6 +135,12 @@ pub struct ChatPanel {
     focus_input: bool,
     /// Showing a made-up chat (the acceptance check): nothing is saved or sent.
     preview: bool,
+    /// The memory page is showing, with its notes as you're editing them: path, text as saved,
+    /// text in the editor.
+    memory_open: bool,
+    notes: Vec<(String, String, String)>,
+    /// "Clear Memory" was clicked once; a second click clears.
+    clear_armed: bool,
 }
 
 fn now() -> i64 {
@@ -170,6 +177,7 @@ impl ChatPanel {
         self.live.clear();
         self.step = None;
         self.notice = None;
+        self.memory_open = false;
         self.chats = self.root.as_deref().map(store::list).unwrap_or_default();
         self.chat = self.root.as_deref().zip(self.chats.first()).and_then(|(r, (id, ..))| store::load(r, id));
     }
@@ -181,6 +189,27 @@ impl ChatPanel {
         self.chat = None;
         self.live.clear();
         self.notice = None;
+        self.focus_input = true;
+    }
+
+    /// Opens the memory page, reading the notes afresh.
+    pub fn open_memory(&mut self) {
+        self.notes = self.root.as_deref().map(|r| memory::Memory::new(r).files()).unwrap_or_default().into_iter().map(|(p, t)| (p, t.clone(), t)).collect();
+        self.memory_open = true;
+        self.clear_armed = false;
+    }
+
+    /// Deletes the chat showing (its file in the project), and shows the next.
+    fn delete_chat(&mut self) {
+        if self.busy() || self.preview {
+            return;
+        }
+        let (Some(root), Some(chat)) = (self.root.clone(), self.chat.take()) else { return };
+        if let Err(e) = store::delete(&root, &chat.id) {
+            self.notice = Some(format!("Couldn't delete the chat: {e}"));
+        }
+        self.chats = store::list(&root);
+        self.live.clear();
         self.focus_input = true;
     }
 
@@ -332,6 +361,7 @@ impl ChatPanel {
 
     pub fn end_preview(&mut self) {
         self.preview = false;
+        self.memory_open = false;
         self.asking = None;
         self.chat = None;
         self.root = None;

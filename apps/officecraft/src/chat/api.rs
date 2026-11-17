@@ -12,6 +12,9 @@ pub const API_URL: &str = "https://api.anthropic.com/v1/messages";
 pub const API_VERSION: &str = "2026-10-21";
 /// Retries a declined request on another model, server-side (`fallbacks: "default"`).
 pub const BETA_FALLBACK: &str = "server-side-fallback-2026-07-01";
+/// Summarises a long conversation server-side when it nears the context window
+/// (`context_management` edit `compact_20260112`).
+pub const BETA_COMPACT: &str = "compact-2026-01-12";
 /// Needed with a sign-in token rather than a key.
 pub const BETA_OAUTH: &str = "oauth-2025-04-20";
 
@@ -110,7 +113,7 @@ fn agent() -> ureq::Agent {
 /// Sends `body` (a Messages request with `stream: true`) and reads the streamed reply,
 /// reporting text and tool calls through `on` as they arrive.
 pub fn send(cred: &Credential, body: &Value, cancel: &AtomicBool, on: &mut dyn FnMut(Event)) -> Result<Reply, ApiError> {
-    let mut betas = vec![BETA_FALLBACK];
+    let mut betas = vec![BETA_FALLBACK, BETA_COMPACT];
     let mut req = agent().post(API_URL).header("anthropic-version", API_VERSION).header("content-type", "application/json");
     match cred {
         Credential::ApiKey(k) => req = req.header("x-api-key", k),
@@ -179,6 +182,8 @@ pub fn parse_stream(reader: impl BufRead, cancel: &AtomicBool, on: &mut dyn FnMu
                         append(block, "text", t);
                         on(Event::Text(index, t.to_string()));
                     }
+                    // A compaction summary arrives whole, in one delta.
+                    "compaction_delta" => block["content"] = delta["content"].clone(),
                     "thinking_delta" => append(block, "thinking", delta["thinking"].as_str().unwrap_or_default()),
                     "signature_delta" => block["signature"] = delta["signature"].clone(),
                     "input_json_delta" => buf.push_str(delta["partial_json"].as_str().unwrap_or_default()),
@@ -235,8 +240,12 @@ pub fn parse_stream(reader: impl BufRead, cancel: &AtomicBool, on: &mut dyn FnMu
 /// The reply's content as it goes back into the conversation. After a server-side fallback
 /// part-way through, the thinking and tool calls written before the last `fallback` block are
 /// left out (the fallback block itself stays where it was); otherwise unchanged.
+///
+/// A compaction block without a summary (`content` null) is left out: the earlier messages it
+/// would have replaced stay in force.
 pub fn echo_content(content: &[Value]) -> Vec<Value> {
-    let Some(last) = content.iter().rposition(|b| b["type"] == "fallback") else { return content.to_vec() };
+    let content: Vec<Value> = content.iter().filter(|b| !(b["type"] == "compaction" && b["content"].is_null())).cloned().collect();
+    let Some(last) = content.iter().rposition(|b| b["type"] == "fallback") else { return content };
     content
         .iter()
         .enumerate()
@@ -249,6 +258,25 @@ pub fn echo_content(content: &[Value]) -> Vec<Value> {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
+
+    #[test]
+    fn a_compaction_summary_is_kept_and_an_empty_one_dropped() {
+        let events = vec![
+            json!({"type": "content_block_start", "index": 0, "content_block": {"type": "compaction", "content": null}}),
+            json!({"type": "content_block_delta", "index": 0, "delta": {"type": "compaction_delta", "content": "Earlier: the budget is in GBP."}}),
+            json!({"type": "content_block_stop", "index": 0}),
+            json!({"type": "content_block_start", "index": 1, "content_block": {"type": "text", "text": ""}}),
+            json!({"type": "content_block_delta", "index": 1, "delta": {"type": "text_delta", "text": "Yes."}}),
+            json!({"type": "content_block_stop", "index": 1}),
+            json!({"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {}}),
+            json!({"type": "message_stop"}),
+        ];
+        let r = parse_stream(sse(&events).as_bytes(), &AtomicBool::new(false), &mut |_| {}).unwrap();
+        assert_eq!(r.content[0], json!({"type": "compaction", "content": "Earlier: the budget is in GBP."}));
+        assert_eq!(echo_content(&r.content).len(), 2);
+        let empty = vec![json!({"type": "compaction", "content": null}), json!({"type": "text", "text": "Hi"})];
+        assert_eq!(echo_content(&empty), vec![json!({"type": "text", "text": "Hi"})]);
+    }
 
     fn sse(events: &[Value]) -> String {
         events.iter().map(|e| format!("event: {}\ndata: {}\n\n", e["type"].as_str().unwrap(), e)).collect()

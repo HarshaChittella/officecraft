@@ -1,7 +1,7 @@
 # Ask AI: a chat built into OfficeCraft
 
-Status: **stage 1 (Ask) and stage 2 (Do) built 2026-11-17** (`apps/officecraft/src/chat/`);
-stages 3–4 not yet.
+Status: **stages 1 (Ask), 2 (Do) and 3 (Remember) built 2026-11-17** (`apps/officecraft/src/chat/`);
+stage 4 not yet.
 
 **Stage 1 as built:** the **Ask AI** button in the title row opens the panel at the right. With a
 project open and a credential set up, you ask; Claude (Opus 5.5, effort medium) reads and searches
@@ -29,6 +29,21 @@ project's permission, as for Claude Desktop:
   pill's review. A file made with `project_new` exists on disk as a blank file; Undo takes back
   what was written into it.
 - **edit_save**: Claude may also save, when asked.
+
+**Stage 3 as built:**
+
+- **Project memory:** Anthropic's memory tool (`memory_20250818`), run in `chat/memory.rs`. Claude's
+  `/memories` folder is the project's `.officecraft/memory/`, so the memory goes with the project
+  and every chat in it reads it (the API tells Claude to check it first). Paths can't leave the
+  folder (no `..`, hidden names, links out); a note is at most 100,000 characters and there are at
+  most 200. Notes need no approval: they aren't the person's files. The chat menu's **Project
+  Memory…** shows every note to edit (Save), delete, or **Clear Memory** (two clicks).
+- **Long chats:** threshold compaction (beta `compact-2026-01-12`, edit `compact_20260112` at
+  150,000 input tokens). The API summarises the earlier conversation into a `compaction` block,
+  which is kept in the chat like any reply; the panel says the earlier part was summarised. An
+  empty summary is left out, so the earlier messages stay.
+- **Past chats:** the chat menu lists the project's chats (newest first) and has **Delete This
+  Chat**.
 
 Each step shows in the conversation ("Made Q3 summary.docx", "Write range · Budget.xlsx"); the note
 sent with each question says what the project allows. A turn may take up to 40 rounds of tools.

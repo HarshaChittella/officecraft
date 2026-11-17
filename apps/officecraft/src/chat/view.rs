@@ -3,7 +3,7 @@
 //! edits, the changes waiting to be kept or undone, and the box to ask in. Before a credential is
 //! set up, a card that sets one up.
 
-use super::{ChatPanel, PanelAction, Seg, cite_label, engine, key, segments};
+use super::{ChatPanel, PanelAction, Seg, cite_label, engine, key, memory, segments};
 use egui::{Align, CornerRadius, Id, Key, Layout, Modifiers, Rect, RichText, ScrollArea, Sense, Stroke, Ui, UiBuilder, pos2, vec2};
 use officecraft_shell::ai::{Changed, ReviewAction};
 use officecraft_shell::icons;
@@ -50,6 +50,10 @@ impl ChatPanel {
             self.setup(&mut ui, p);
             return out;
         }
+        if self.memory_open {
+            self.memory_page(&mut ui, p);
+            return out;
+        }
         let composer_h = 112.0;
         let list = Rect::from_min_max(body.min, pos2(body.right(), body.bottom() - composer_h - space::S));
         let composer = Rect::from_min_max(pos2(body.left(), body.bottom() - composer_h), body.max);
@@ -83,6 +87,8 @@ impl ChatPanel {
         let m = m.on_hover_text("Chats and settings");
         let mut pick = None;
         let mut forget = false;
+        let mut open_memory = false;
+        let mut delete = false;
         egui::Popup::menu(&m).show(|ui| {
             ui.set_min_width(240.0);
             if self.chats.is_empty() {
@@ -96,12 +102,28 @@ impl ChatPanel {
                 }
             }
             ui.separator();
+            if ui.button("Project Memory…").on_hover_text("What Claude remembers about this project").clicked() {
+                open_memory = true;
+            }
+            let can_delete = self.chat.as_ref().is_some_and(|c| !c.messages.is_empty()) && !self.busy();
+            if ui.add_enabled(can_delete, egui::Button::new("Delete This Chat")).clicked() {
+                delete = true;
+            }
+            ui.separator();
             if (key::has_saved_key() || key::use_ant()) && ui.button("Remove API Key and Sign-In").clicked() {
                 forget = true;
             }
         });
         if let Some(id) = pick {
+            self.memory_open = false;
             self.switch_to(&id);
+        }
+        if open_memory {
+            self.open_memory();
+        }
+        if delete {
+            self.memory_open = false;
+            self.delete_chat();
         }
         if forget {
             key::forget();
@@ -221,6 +243,14 @@ impl ChatPanel {
                                     let (name, input) = (b["name"].as_str().unwrap_or_default(), &b["input"]);
                                     step_row(ui, p, &engine::step_label(name, input), false, engine::is_change(name, input));
                                 }
+                                Some("compaction") => {
+                                    ui.label(
+                                        RichText::new("The earlier part of this chat was summarised to make room; Claude works from the summary.")
+                                            .font(text::meta())
+                                            .italics()
+                                            .color(p.text_muted),
+                                    );
+                                }
                                 Some("fallback") => {
                                     ui.label(RichText::new("Another Claude model finished this answer.").font(text::meta()).italics().color(p.text_muted));
                                 }
@@ -279,6 +309,92 @@ impl ChatPanel {
                 }
             });
         });
+    }
+
+    /// The project's memory: each note, editable, with Save and Delete; and Clear Memory.
+    fn memory_page(&mut self, ui: &mut Ui, p: &Palette) {
+        if ui.link(RichText::new("‹ Back to Chat").font(text::meta())).clicked() {
+            self.memory_open = false;
+            return;
+        }
+        ui.add_space(space::XS);
+        ui.label(RichText::new("Project memory").font(text::card()).color(p.text));
+        ui.label(
+            RichText::new(
+                "What Claude remembers about this project; every chat here reads it. It's kept in the project folder (.officecraft/memory), so it goes with the project. Change or delete anything.",
+            )
+            .font(text::meta())
+            .color(p.text_muted),
+        );
+        ui.add_space(space::S);
+        let Some(root) = self.root.clone() else { return };
+        let mem = memory::Memory::new(&root);
+        let (mut save, mut delete, mut clear) = (None, None, false);
+        let width = ui.available_width();
+        let bottom_h = if self.notes.is_empty() { 0.0 } else { size::CONTROL_H + space::S };
+        let list_h = (ui.available_height() - bottom_h).max(80.0);
+        ScrollArea::vertical().max_height(list_h).auto_shrink([false, true]).show(ui, |ui| {
+            ui.set_width(width);
+            if self.notes.is_empty() {
+                ui.label(
+                    RichText::new("Nothing remembered yet. Claude notes lasting facts here as you work together, or when you ask it to remember something.")
+                        .font(text::body())
+                        .color(p.text_muted),
+                );
+            }
+            for (i, (path, saved, text_)) in self.notes.iter_mut().enumerate() {
+                card(ui, p, |ui| {
+                    let name = path.strip_prefix("/memories/").unwrap_or(path);
+                    ui.label(RichText::new(name).font(text::card()).color(p.text));
+                    ui.add(
+                        egui::TextEdit::multiline(text_)
+                            .id(Id::new(("cw_memory_note", i)))
+                            .font(text::body())
+                            .desired_width(ui.available_width())
+                            .desired_rows(3),
+                    );
+                    let changed = text_ != saved;
+                    ui.allocate_ui_with_layout(vec2(ui.available_width(), size::CONTROL_H), Layout::right_to_left(Align::Center), |ui| {
+                        if widgets::button(ui, p, "Save", ButtonKind::Primary, changed).clicked() {
+                            save = Some(i);
+                        }
+                        if widgets::button(ui, p, "Delete", ButtonKind::Secondary, true).clicked() {
+                            delete = Some(i);
+                        }
+                    });
+                });
+                ui.add_space(space::XS);
+            }
+        });
+        if !self.notes.is_empty() {
+            ui.add_space(space::S);
+            ui.allocate_ui_with_layout(vec2(width, size::CONTROL_H), Layout::right_to_left(Align::Center), |ui| {
+                let label = if self.clear_armed { "Click Again to Clear" } else { "Clear Memory" };
+                let b = widgets::button(ui, p, label, ButtonKind::Secondary, true);
+                if b.on_hover_text("Forget everything Claude noted about this project").clicked() {
+                    if self.clear_armed {
+                        clear = true;
+                    }
+                    self.clear_armed = !self.clear_armed;
+                }
+            });
+        }
+        let result = if let Some(i) = save {
+            let (path, _, text_) = &self.notes[i];
+            mem.save(path, text_).map(|()| self.notes[i].1 = self.notes[i].2.clone())
+        } else if let Some(i) = delete {
+            mem.delete(&self.notes[i].0).map(|()| {
+                self.notes.remove(i);
+            })
+        } else if clear {
+            mem.clear().map(|()| self.notes.clear())
+        } else {
+            Ok(())
+        };
+        if let Err(e) = result {
+            self.notice = Some(format!("Couldn't change the memory: {e}"));
+        }
+        self.show_notice(ui, p);
     }
 
     fn show_notice(&self, ui: &mut Ui, p: &Palette) {

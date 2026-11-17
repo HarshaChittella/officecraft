@@ -1592,7 +1592,26 @@ impl Check {
                         self.screenshot(ctx, "ask-ai-do");
                         self.wait = 90;
                     }
+                    4 => {
+                        // Stage 3: the project's memory, with two notes.
+                        app.ai.changed.clear();
+                        app.chat.end_preview();
+                        let root = app.projects.current_item().map(|i| i.root).unwrap_or_else(|| self.dir.clone());
+                        let mem = crate::chat::memory::Memory::new(&root);
+                        let _ = mem.run(&serde_json::json!({"command": "create", "path": "/memories/project.md", "file_text": "- Budget figures are in GBP.\n- Priya owns the pitch deck; Sam the Q3 report.\n"}));
+                        let _ = mem.run(&serde_json::json!({"command": "create", "path": "/memories/preferences.md", "file_text": "- Summaries: one page, bullet points, no tables.\n"}));
+                        app.chat.show_preview(crate::chat::store::Chat::new(0), root);
+                        app.chat.open_memory();
+                        self.wait = 90;
+                    }
+                    5 => {
+                        self.check(app.chat.open, "Ask AI shows the project's memory");
+                        self.screenshot(ctx, "ask-ai-memory");
+                        self.wait = 90;
+                    }
                     _ => {
+                        let root = app.projects.current_item().map(|i| i.root).unwrap_or_else(|| self.dir.clone());
+                        let _ = crate::chat::memory::Memory::new(&root).clear();
                         app.ai.changed.clear();
                         app.chat.end_preview();
                         self.stage = Stage::Quit { phase: 0 };

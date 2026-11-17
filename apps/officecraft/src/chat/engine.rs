@@ -5,6 +5,7 @@
 //! that lets the AI only read, the first edit asks you first.
 
 use super::api::{self, ApiError, Credential, Event, Reply};
+use super::memory::{self, Memory};
 use officecraft_core::project::{Permission, Project};
 use officecraft_mcp::Server;
 use serde_json::{Value, json};
@@ -19,6 +20,9 @@ const MAX_TOKENS: u32 = 64_000;
 /// Rounds of tool calls in one turn before it stops (making a document takes many).
 const MAX_ROUNDS: usize = 40;
 
+/// When the conversation is summarised server-side: at this many input tokens (the API's default).
+const COMPACT_AT: u64 = 150_000;
+
 /// What a tool result says when the person didn't allow edits.
 const DECLINED: &str = "Not run: the person didn't allow changes to files in this project. Don't try other changes in this turn; tell them what you would change, and that they can allow edits when asked.";
 
@@ -30,6 +34,8 @@ Look at the files with the tools before answering questions about them; don't gu
 You can also change files and make new ones. Each app's tools work on a project file named by `file`: doc.* for documents, sheet.* for sheets, deck.* for presentations, pdf.* for PDFs. Only a few are listed: tool_search finds the others (with `name`, it gives a tool's full input), and tool_call runs them. project_new makes a blank .docx, .xlsx, .pptx or .pdf to fill. Read a file before changing it, and change only what was asked. A change happens live in the file's tab, where the person watches it and then keeps or undoes it, so don't save unless they ask (project_save says when the project doesn't allow it). If the project lets you only read, OfficeCraft asks the person when you first try a change; if they say no, the tool says so. Afterwards, say in a sentence or two what you changed and where, citing it.
 
 Cite what you take from a file right after the statement, as [[file|where]]: file is the path the tools gave, and where is the tool's \"where\" value, such as Sheet1!B4, Slide 3 or Page 2. For a passage of a document, put a few of its words in quotes as where: [[Q3 report.docx|\"revenue grew in every region\"]]. Use [[file]] for a file as a whole.
+
+You have a memory for this project: the memory tool's /memories folder, kept with the project and read by every chat in it. Note there what will matter in later chats: lasting facts about the project and its files (\"the budget is in GBP\", \"Priya owns the pitch deck\"), how the person likes things done, and work left to finish. Don't copy file contents into it (the files are always there to read), don't store passwords or other secrets, and keep it short: a few organised files you update, not a new file per chat. When the person asks you to remember or forget something, do it there.
 
 Write for a chat panel about 360 points wide: lead with the answer, keep paragraphs short, use simple \"- \" lists and **bold** sparingly, and no tables or headings.";
 
@@ -67,6 +73,7 @@ pub struct Tools {
     server: Server,
     defs: Vec<Value>,
     root: PathBuf,
+    memory: Memory,
 }
 
 impl Tools {
@@ -93,14 +100,18 @@ impl Tools {
                     "eager_input_streaming": true,
                 })
             })
-            .collect();
-        Ok(Tools { server, defs, root: root.to_path_buf() })
+            .collect::<Vec<Value>>();
+        let mut defs = defs;
+        defs.push(memory::tool_def());
+        Ok(Tools { server, defs, root: root.to_path_buf(), memory: Memory::new(root) })
     }
 
     /// Whether running `name` would change a file in a project that lets the AI only read
     /// (so the person is asked first).
     pub fn needs_approval(&self, name: &str, input: &Value) -> bool {
-        self.server.is_edit(name, input) && Project::open(&self.root).map(|p| p.settings.ai_permission).unwrap_or(Permission::Read) == Permission::Read
+        // Its own notes, in the project's .officecraft folder, aren't the person's files.
+        name != "memory"
+            && self.server.is_edit(name, input) && Project::open(&self.root).map(|p| p.settings.ai_permission).unwrap_or(Permission::Read) == Permission::Read
     }
 
     pub fn defs(&self) -> &[Value] {
@@ -109,6 +120,9 @@ impl Tools {
 
     /// Runs `name` with `input`: the result's text, and whether it failed.
     pub fn run(&mut self, name: &str, input: &Value) -> (String, bool) {
+        if name == "memory" {
+            return self.memory.run(input);
+        }
         let Some(def) = self.defs.iter().find(|d| d["name"] == name) else {
             return (format!("{name} isn't available in this chat."), true);
         };
@@ -155,6 +169,7 @@ pub fn step_label(name: &str, input: &Value) -> String {
     }
     let s = |k: &str| input[k].as_str().unwrap_or_default().to_string();
     match name {
+        "memory" => memory::step_label(input),
         "project_search" => format!("Searched “{}”", s("query")),
         "project_read" => format!("Read {}", s("file")),
         "project_files" => "Listed the project's files".into(),
@@ -184,7 +199,7 @@ pub fn is_change(name: &str, input: &Value) -> bool {
     if name == "tool_call" {
         return is_change(input["name"].as_str().unwrap_or_default(), input.get("arguments").unwrap_or(&Value::Null));
     }
-    !name.starts_with("project_") && !name.starts_with("tool_") && !is_reading(name) || matches!(name, "project_new" | "project_save")
+    name != "memory" && !name.starts_with("project_") && !name.starts_with("tool_") && !is_reading(name) || matches!(name, "project_new" | "project_save")
 }
 
 /// An app's tool that only reads, by its name (`sheet.read_range`, `doc.get_text`, …).
@@ -208,6 +223,9 @@ pub fn request(tools: &[Value], messages: &[Value]) -> Value {
         "system": [{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
         "tools": tools,
         "messages": messages,
+        // A long chat is summarised on the server instead of running out of room; the summary
+        // comes back as a `compaction` block, and what came before it is dropped.
+        "context_management": {"edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": COMPACT_AT}}]},
     })
 }
 
@@ -347,7 +365,8 @@ mod tests {
             assert!(names.contains(&n), "{n} offered: {names:?}");
         }
         assert!(names.len() < 25, "the compact list, not every tool: {}", names.len());
-        assert!(tools.defs().iter().all(|d| d["eager_input_streaming"] == true && d["input_schema"]["type"] == "object"));
+        assert!(tools.defs().iter().filter(|d| d["name"] != "memory").all(|d| d["eager_input_streaming"] == true && d["input_schema"]["type"] == "object"));
+        assert!(tools.defs().iter().any(|d| d["type"] == "memory_20250818"), "the memory tool");
 
         let mut script = Script {
             replies: vec![
@@ -462,6 +481,23 @@ mod tests {
         });
         assert_eq!(asked, 1);
         assert!(root.join("a.docx").is_file() && root.join("b.xlsx").is_file());
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn notes_go_to_the_project_memory_without_asking_and_requests_compact() {
+        let root = project("memory");
+        let mut tools = Tools::new(&root, Some(&root.join(".no-window"))).unwrap();
+        let note = json!({"type": "tool_use", "id": "m1", "name": "memory", "input": {"command": "create", "path": "/memories/project.md", "file_text": "Budget in GBP\n"}});
+        let mut script = Script { replies: vec![reply("tool_use", vec![note]), reply("end_turn", vec![json!({"type": "text", "text": "Noted."})])], sent: vec![] };
+        let mut messages = vec![json!({"role": "user", "content": "Remember the budget is in GBP"})];
+        let mut steps = Vec::new();
+        run(&mut messages, &mut tools, &mut script, &AtomicBool::new(false), &mut |u| steps.push(u), &mut |_| panic!("a note doesn't ask"));
+        assert!(steps.contains(&Update::Step("Noted in memory: project.md".into())));
+        assert_eq!(std::fs::read_to_string(root.join(".officecraft/memory/project.md")).unwrap(), "Budget in GBP\n");
+        let edit = &script.sent[0]["context_management"]["edits"][0];
+        assert_eq!(edit["type"], "compact_20260112");
+        assert_eq!(edit["trigger"]["value"], COMPACT_AT);
         let _ = std::fs::remove_dir_all(&root);
     }
 
