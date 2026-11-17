@@ -1,4 +1,4 @@
-Craftworks Phase 2 check (dark)
+OfficeCraft Phase 2 check (dark)
 MEM start page, no engines: 119 MB resident
 PASS the app opens on the start page
 PASS the PDF opened in a tab (it showed as opening meanwhile)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Writes Craftworks' app icon into an .iconset folder.
+"""Writes OfficeCraft's app icon into an .iconset folder.
 
-The artwork is drawn in code by crates/craftworks-shell/assets/make_icons.py (`app_master`):
+The artwork is drawn in code by crates/officecraft-shell/assets/make_icons.py (`app_master`):
 a fan of four glass sheets on a blue glass tile, the same mark the app shows on its Home tab.
 
 Usage: make_icon.py OUT.iconset
@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 from PIL import Image
 
-ART = Path(__file__).resolve().parents[2] / "crates/craftworks-shell/assets/make_icons.py"
+ART = Path(__file__).resolve().parents[2] / "crates/officecraft-shell/assets/make_icons.py"
 
 
 def main() -> None:

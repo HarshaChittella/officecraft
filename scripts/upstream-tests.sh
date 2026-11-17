@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Run each vendored Craft repo's own test suite on Craftworks' shared pins (docs/PLAN.md task 0.6).
+# Run each vendored Craft repo's own test suite on OfficeCraft's shared pins (docs/PLAN.md task 0.6).
 #
 # Each repo is tested inside its own checkout, with `--config` overrides that move it onto the
 # pins our workspace uses (egui 725a39f, krilla 6e03f65, craft-i18n 1e51542). Nothing in the

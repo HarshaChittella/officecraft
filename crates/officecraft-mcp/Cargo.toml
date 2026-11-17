@@ -1,0 +1,25 @@
+[package]
+name = "officecraft-mcp"
+description = "OfficeCraft's one AI connector: an MCP server over all four Craft engines and the project, with live edits to open tabs."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+officecraft-core = { path = "../officecraft-core" }
+wordcraft-mcp.workspace = true
+gridcraft-mcp.workspace = true
+deckcraft-mcp.workspace = true
+pdfcraft-automation.workspace = true
+serde_json.workspace = true
+log.workspace = true
+getrandom = "0.3"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+egui.workspace = true
+pdfcraft-engine.workspace = true

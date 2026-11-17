@@ -10,7 +10,7 @@ What's verified automatically on every build, and what needs a person, another M
 | Reduce motion stops animation in the chrome and in every app | `--check` Display stage (with the setting forced on) | ✅ |
 | Increase contrast switches the chrome to its higher-contrast colours (muted text ≥ 7:1 on every surface) | `--check` Display stage; `tokens::tests` | ✅ |
 | View ▸ Interface Text Size scales the chrome's text (Default, Large, Larger; kept between launches) | `--check` Display stage; `tokens::tests` | ✅ |
-| A panic writes a crash report to `~/Library/Logs/Craftworks`; the next launch offers to show it | `--check` Crash stage; `crash::tests` | ✅ |
+| A panic writes a crash report to `~/Library/Logs/OfficeCraft`; the next launch offers to show it | `--check` Crash stage; `crash::tests` | ✅ |
 | No crate under a licence outside the allowlist | `scripts/licences.py` (run by `bundle.sh`; fails the build) | ✅ 935 crates |
 | The hardened runtime needs no exceptions | `--check` of the ad-hoc, hardened build from the disk image | ✅ |
 
@@ -20,7 +20,7 @@ What's verified automatically on every build, and what needs a person, another M
 |---|---|---|
 | VoiceOver: tab strip (each tab read with its name and "selected"), "+" button, sidebar, search field, group labels, AI pill and review panel | ⌘F5, then VO-arrows through the title row and sidebar | ⏳ |
 | VoiceOver inside each kind of tab: text in a document, a cell's address and value in a sheet, a slide's shapes, a PDF's text | Same, in each app's tab | ⏳ |
-| System Settings ▸ Accessibility ▸ Display: Reduce motion and Increase contrast followed live, without restarting | Toggle each while Craftworks is open | ⏳ |
+| System Settings ▸ Accessibility ▸ Display: Reduce motion and Increase contrast followed live, without restarting | Toggle each while OfficeCraft is open | ⏳ |
 
 ## Needs your Apple account or other Macs
 

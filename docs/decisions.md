@@ -80,22 +80,22 @@ The app's title row (WordCraft, DeckCraft and GridCraft: QAT Save/Undo/Redo, Aut
 ## D9 `unsafe` exception for our two crates. SETTLED 2026-11-14 — **superseded by D24 (no `unsafe` anywhere)**
 
 - Our workspace keeps `unsafe_code = "forbid"`, except in:
-  - `craftworks-ffi` (`extern "C"`, raw pointers from Swift), and
-  - one module of `craftworks-render` (`create_surface_unsafe` with a `CAMetalLayer`).
+  - `officecraft-ffi` (`extern "C"`, raw pointers from Swift), and
+  - one module of `officecraft-render` (`create_surface_unsafe` with a `CAMetalLayer`).
 - Every `unsafe` block needs a `// SAFETY:` comment (enforced with `clippy::undocumented_unsafe_blocks`), and both crates set `#![deny(unsafe_op_in_unsafe_fn)]`.
-- In `craftworks-render`, only the one surface module may use `unsafe`; the crate root is `deny(unsafe_code)` and that module alone has `allow`.
+- In `officecraft-render`, only the one surface module may use `unsafe`; the crate root is `deny(unsafe_code)` and that module alone has `allow`.
 - No upstream crate gets `unsafe`.
 
-## D10 Repository location. SETTLED 2026-11-14: `~/src/craftworks`
+## D10 Repository location. SETTLED 2026-11-14: `~/src/officecraft`
 
 - The current path contains spaces and a curly apostrophe (`…/Documents - <name>’s MacBook Pro/Docucraft`).
 - Build scripts, `xcodebuild` phases and some `build.rs` files mis-quote such paths.
 - It also sits under `~/Documents`, which may be iCloud-synced; a `target/` folder of about 20 GB there is a bad idea.
-- **Settled:** `~/src/craftworks` (not iCloud-synced). The docs moved there on 2026-11-14.
+- **Settled:** `~/src/officecraft` (not iCloud-synced). The docs moved there on 2026-11-14.
 
 ## D11 Repo name. SETTLED 2026-11-14
 
-Working name Craftworks, as in the brief: `craftworks` for the folder, crates and app.
+Working name OfficeCraft, as in the brief: `officecraft` for the folder, crates and app.
 
 ## D12 PdfCraft file dialogs stay on `rfd` for now. SETTLED 2026-11-14
 
@@ -188,16 +188,16 @@ Font atlas per engine context: Word 8192×64 (2 MB RGBA), the others 8192×32 (1
 - **Cost:** the chrome is drawn with egui, not AppKit. [design.md](design.md) sets the bar for a modern, consistent look.
 - **Native where it matters:** the menu bar (`craft-menu`/`muda`), file panels (`rfd`), clipboard (`arboard`), printing (`craft-print`), accessibility (AccessKit through eframe), updates (`craft-update`).
 - **Repo layout now:**
-  - `crates/craftworks-core` (Editor, tabs, routing, projects)
-  - `crates/craftworks-render` (engine contexts and painting)
-  - `crates/craftworks-shell` (chrome UI, design tokens, icons)
-  - `crates/craftworks-platform` (Services)
-  - `crates/craftworks-mcp`
-  - `apps/craftworks` (the app)
-  - `apps/craftworks-cli`
+  - `crates/officecraft-core` (Editor, tabs, routing, projects)
+  - `crates/officecraft-render` (engine contexts and painting)
+  - `crates/officecraft-shell` (chrome UI, design tokens, icons)
+  - `crates/officecraft-platform` (Services)
+  - `crates/officecraft-mcp`
+  - `apps/officecraft` (the app)
+  - `apps/officecraft-cli`
   - `packaging/macos`
   
-  `craftworks-ffi`, `macos/` and `scripts/build-rust.sh` are dropped.
+  `officecraft-ffi`, `macos/` and `scripts/build-rust.sh` are dropped.
 - **Superseded:** D8. D5 and D9 are adjusted.
 
 ## D24 No `unsafe` anywhere. SETTLED 2026-11-14
@@ -226,7 +226,7 @@ The shell takes ⌘T (new tab, per the brief), ⌘W (close tab), ⌘O (open) and
 
 The owner chose ⌘T for new tabs, so WordCraft's, GridCraft's and DeckCraft's ⌘T commands (hanging indent, Insert Table, Font dialog) stay reachable from their ribbons only.
 
-Phase 3 made this a table (`craftworks_shell::keys::SHORTCUTS`). A test reads all four apps' registries (`craftworks_core::keymaps`) and fails on any overlap not listed in `keys::INTENDED`. Phase 3 added **⌥⌘T, reopen closed tab**, which no app uses. The test lists the 13 intended overlaps: ⌘T ×3 (above), ⌘W and ⌘O in all four apps (close and open), and ⌃Tab / ⌃⇧Tab in PdfCraft (its next and previous document tab).
+Phase 3 made this a table (`officecraft_shell::keys::SHORTCUTS`). A test reads all four apps' registries (`officecraft_core::keymaps`) and fails on any overlap not listed in `keys::INTENDED`. Phase 3 added **⌥⌘T, reopen closed tab**, which no app uses. The test lists the 13 intended overlaps: ⌘T ×3 (above), ⌘W and ⌘O in all four apps (close and open), and ⌃Tab / ⌃⇧Tab in PdfCraft (its next and previous document tab).
 
 Routing: the window's input hook (`App::raw_input_hook`) takes keyboard events out of the window's own egui input. Shortcuts go to the window; everything else goes to the shown document, unless the chrome has the keyboard (the new-tab popover, or the start page's filter). Pointer events go to both.
 
@@ -238,7 +238,7 @@ Routing: the window's input hook (`App::raw_input_hook`) takes keyboard events o
 
 ## D28 Accessibility across contexts: graft in the window's output hook. SETTLED 2026-11-14 (spike done; VoiceOver pass in Phase 8)
 
-- An egui plugin on the window's context (`craftworks_render::a11y::Graft`) appends the shown engine's AccessKit tree to the window's update after the pass, under a "Tab content" node of the chrome.
+- An egui plugin on the window's context (`officecraft_render::a11y::Graft`) appends the shown engine's AccessKit tree to the window's update after the pass, under a "Tab content" node of the chrome.
 - egui node ids are 64-bit hashes, so only egui's fixed root id collides; the engine's root is renamed, and screen-reader actions aimed at it are renamed back.
 - Engines build their trees only while a client listens (the window produced a tree), so it costs nothing otherwise.
 - `--check` turns accessibility on: the merged tree has 176 nodes with our tab list and New tab, and GridCraft's ribbon (Home, Insert…) under the tab content.
@@ -277,14 +277,14 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 
 ## D34 App bundle. SETTLED 2026-11-14 (identifier to confirm before Phase 8)
 
-- Bundle id `dev.craftworks.Craftworks` (a placeholder; Phase 8 signing needs the real one).
-- Document types use neutral names (Document, Spreadsheet, Presentation, PDF) and `LSHandlerRank` **Alternate**: Craftworks offers to open these files but never takes over the user's default app.
+- Bundle id `dev.officecraft.OfficeCraft` (a placeholder; Phase 8 signing needs the real one).
+- Document types use neutral names (Document, Spreadsheet, Presentation, PDF) and `LSHandlerRank` **Alternate**: OfficeCraft offers to open these files but never takes over the user's default app.
 - The icon is our own, drawn by `packaging/macos/make_icon.py` at build time. No icon file is committed, so there's no asset row to add.
 - Finder's open-documents and the Dock's Quit arrive through `fmv-macos-events`, the safe wrapper the Craft apps use (MIT OR Apache-2.0).
 
-## D35 Platform services live in `craftworks-platform`. SETTLED 2026-11-14
+## D35 Platform services live in `officecraft-platform`. SETTLED 2026-11-14
 
-- One crate builds each app's `Services` (`craftworks_platform::editor(kind, &platform)`), from crates already in the four apps' dependency set: `objc2-app-kit` (NSPasteboard), `arboard` (pictures), `rfd`, `craft-print`, `image`. No `unsafe` (D24).
+- One crate builds each app's `Services` (`officecraft_platform::editor(kind, &platform)`), from crates already in the four apps' dependency set: `objc2-app-kit` (NSPasteboard), `arboard` (pictures), `rfd`, `craft-print`, `image`. No `unsafe` (D24).
 - `Platform::system()` in the app; `Platform::isolated(MemoryClipboard)` for tests and `--check`, which then never touch your clipboard, open a panel or print.
 - The Craft binaries' own `clipboard.rs`/`print.rs` aren't libraries, so they weren't copied: the glue follows each app's documented `Services` contract instead.
 
@@ -295,22 +295,22 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 
 ## D37 Links the engines open. SETTLED 2026-11-14
 
-- `file://` links to a document Craftworks opens go to a tab: that's how DeckCraft's Print (export to PDF, then open it) lands in a PDF tab, ready to print.
+- `file://` links to a document OfficeCraft opens go to a tab: that's how DeckCraft's Print (export to PDF, then open it) lands in a PDF tab, ready to print.
 - `https`, `http` and `mailto` open in the system (`open --`). Anything else is refused and logged.
 - Real printing isn't verified on this Mac: it has no printer (`lpstat: No destinations added`). Adding a virtual PDF printer is a system change, so it waits for the owner.
 
-## D38 Projects are folders with `.craftworks/project.json`. SETTLED 2026-11-16
+## D38 Projects are folders with `.officecraft/project.json`. SETTLED 2026-11-16
 
 - Schema version 1: `name`, `pinned` (relative paths with `/`), `ai.instructions`, `ai.permission`.
 - Reading is lenient: missing fields take defaults; pins that leave the folder are dropped; an unknown permission becomes `read`.
 - A file whose version is newer than this build's is shown read-only and never written.
-- Writes are atomic. The list of known projects lives in Craftworks' settings, not in the folders.
+- Writes are atomic. The list of known projects lives in OfficeCraft's settings, not in the folders.
 
 ## D39 The project folder is polled, not watched with `notify`. SETTLED 2026-11-16
 
 - `notify` isn't in any Craft app's dependencies, and adding one needs the owner's OK. A bounded rescan every 2 s on a background thread is enough for a project folder: at most 20,000 entries and 12 levels deep; symlinks, hidden folders, `node_modules`, `target`, `__pycache__` and `Library` aren't entered.
 - It only wakes the window when something changed.
-- The index (`craftworks-core::index`) reads files with each app's own headless reader. That needs one new path dependency, `pdfcraft-render`, which is from the PdfCraft repo, so nothing outside the four repos is added. A reader that fails on a damaged file is caught, and the file is listed as "couldn't be read".
+- The index (`officecraft-core::index`) reads files with each app's own headless reader. That needs one new path dependency, `pdfcraft-render`, which is from the PdfCraft repo, so nothing outside the four repos is added. A reader that fails on a damaged file is caught, and the file is listed as "couldn't be read".
 
 ## D40 Sidebar shortcuts: ⌃⌘S and ⌃⇧F. SETTLED 2026-11-16 (owner's decision)
 
@@ -327,11 +327,11 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 
 - WordCraft, GridCraft and DeckCraft have no Mac menu bar we can link (GridCraft's is in its binary), so theirs are built from each app's own command catalogue. Ribbon tabs are mapped onto the usual Mac menus. Labels, shortcuts and order come from the app, so the menus stay in step with its ribbon. PdfCraft's own menu bar is used as it is.
 - A clicked item with a shortcut sends that keystroke (the app's own handling, dialogs included). One without a shortcut runs the command; one that needs arguments and has no shortcut is left out.
-- `craftworks-core` now depends on `craft-menu` and `craft-keymap`, from craft-libs at the pinned revision; they're not new to the graph.
+- `officecraft-core` now depends on `craft-menu` and `craft-keymap`, from craft-libs at the pinned revision; they're not new to the graph.
 
 ## D43 One binary: the window, `mcp` and `open`. SETTLED 2026-11-16
 
-- `craftworks mcp --project DIR` runs the connector without a window, and `craftworks open FILE` hands files to the running window (or starts it). There's no separate `apps/craftworks-cli`: the app bundle's one executable serves both, so the Claude Code setup line names a file every install has.
+- `officecraft mcp --project DIR` runs the connector without a window, and `officecraft open FILE` hands files to the running window (or starts it). There's no separate `apps/officecraft-cli`: the app bundle's one executable serves both, so the Claude Code setup line names a file every install has.
 
 ## D44 Live edits go through each app's own headless backend. SETTLED 2026-11-16
 
@@ -340,7 +340,7 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 
 ## D45 AutoSave pauses while an AI's edits wait for review. SETTLED 2026-11-16
 
-- WordCraft and GridCraft save a changed file within a few seconds when AutoSave is on, which would save an AI's edit before you see it. While an app has AI edits in the review list, Craftworks turns its AutoSave off. Keep or Undo puts it back as it was. DeckCraft only writes AutoRecover copies, so it's left alone.
+- WordCraft and GridCraft save a changed file within a few seconds when AutoSave is on, which would save an AI's edit before you see it. While an app has AI edits in the review list, OfficeCraft turns its AutoSave off. Keep or Undo puts it back as it was. DeckCraft only writes AutoRecover copies, so it's left alone.
 
 ## D46 Display settings: the system's for motion and contrast, the app's for text size. SETTLED 2026-11-16
 
@@ -349,7 +349,7 @@ After its "Do you want to save changes…" prompt is cancelled, WordCraft doesn'
 
 ## D47 The blank document an app keeps for itself is set aside. SETTLED 2026-11-16
 
-- GridCraft and WordCraft are never empty: they open an untitled blank at start and make another when their last document closes. Craftworks used to adopt it as a tab, so closing your new sheet left "Book1" in its place (the owner's bug report).
+- GridCraft and WordCraft are never empty: they open an untitled blank at start and make another when their last document closes. OfficeCraft used to adopt it as a tab, so closing your new sheet left "Book1" in its place (the owner's bug report).
 - `engines/blanks.rs` keeps it out of the list. The next New reuses it, the way a fresh Book1 is replaced; opening a file closes it. An app's own New still makes a tab.
 
 ## Upstream test results (task 0.6)

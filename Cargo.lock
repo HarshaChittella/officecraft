@@ -1667,121 +1667,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "craftworks"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "craft-keymap",
- "craft-menu",
- "craft-quit",
- "craftworks-core",
- "craftworks-mcp",
- "craftworks-platform",
- "craftworks-render",
- "craftworks-shell",
- "eframe",
- "egui",
- "egui-wgpu",
- "fmv-macos-events",
- "image",
- "log",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "pdfcraft-engine",
- "rfd",
- "serde_json",
- "wgpu",
-]
-
-[[package]]
-name = "craftworks-core"
-version = "0.1.0"
-dependencies = [
- "craft-keymap",
- "craft-menu",
- "deckcraft-engine",
- "deckcraft-mcp",
- "deckcraft-ui-egui",
- "egui",
- "gridcraft-engine",
- "gridcraft-mcp",
- "gridcraft-ui-egui",
- "log",
- "pdfcraft-automation",
- "pdfcraft-engine",
- "pdfcraft-render",
- "pdfcraft-ui-egui",
- "serde_json",
- "wordcraft-doc",
- "wordcraft-engine",
- "wordcraft-mcp",
- "wordcraft-ui-egui",
-]
-
-[[package]]
-name = "craftworks-mcp"
-version = "0.1.0"
-dependencies = [
- "craftworks-core",
- "deckcraft-mcp",
- "egui",
- "getrandom 0.3.4",
- "gridcraft-mcp",
- "log",
- "pdfcraft-automation",
- "pdfcraft-engine",
- "serde_json",
- "wordcraft-mcp",
-]
-
-[[package]]
-name = "craftworks-platform"
-version = "0.1.0"
-dependencies = [
- "arboard",
- "craft-print",
- "craft-ui",
- "craftworks-core",
- "craftworks-render",
- "deckcraft-ui-egui",
- "egui",
- "gridcraft-ui-egui",
- "image",
- "log",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "rfd",
- "serde_json",
- "wordcraft-ui-egui",
-]
-
-[[package]]
-name = "craftworks-render"
-version = "0.1.0"
-dependencies = [
- "craftworks-core",
- "egui",
- "egui-wgpu",
- "log",
- "serde_json",
- "wgpu",
-]
-
-[[package]]
-name = "craftworks-shell"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "craftworks-core",
- "egui",
- "image",
- "log",
- "serde_json",
-]
-
-[[package]]
 name = "crc32fast"
 version = "1.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5073,6 +4958,121 @@ dependencies = [
  "rten-tensor",
  "thiserror 2.0.21",
  "wasm-bindgen",
+]
+
+[[package]]
+name = "officecraft"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "craft-keymap",
+ "craft-menu",
+ "craft-quit",
+ "eframe",
+ "egui",
+ "egui-wgpu",
+ "fmv-macos-events",
+ "image",
+ "log",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "officecraft-core",
+ "officecraft-mcp",
+ "officecraft-platform",
+ "officecraft-render",
+ "officecraft-shell",
+ "pdfcraft-engine",
+ "rfd",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
+name = "officecraft-core"
+version = "0.1.0"
+dependencies = [
+ "craft-keymap",
+ "craft-menu",
+ "deckcraft-engine",
+ "deckcraft-mcp",
+ "deckcraft-ui-egui",
+ "egui",
+ "gridcraft-engine",
+ "gridcraft-mcp",
+ "gridcraft-ui-egui",
+ "log",
+ "pdfcraft-automation",
+ "pdfcraft-engine",
+ "pdfcraft-render",
+ "pdfcraft-ui-egui",
+ "serde_json",
+ "wordcraft-doc",
+ "wordcraft-engine",
+ "wordcraft-mcp",
+ "wordcraft-ui-egui",
+]
+
+[[package]]
+name = "officecraft-mcp"
+version = "0.1.0"
+dependencies = [
+ "deckcraft-mcp",
+ "egui",
+ "getrandom 0.3.4",
+ "gridcraft-mcp",
+ "log",
+ "officecraft-core",
+ "pdfcraft-automation",
+ "pdfcraft-engine",
+ "serde_json",
+ "wordcraft-mcp",
+]
+
+[[package]]
+name = "officecraft-platform"
+version = "0.1.0"
+dependencies = [
+ "arboard",
+ "craft-print",
+ "craft-ui",
+ "deckcraft-ui-egui",
+ "egui",
+ "gridcraft-ui-egui",
+ "image",
+ "log",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "officecraft-core",
+ "officecraft-render",
+ "rfd",
+ "serde_json",
+ "wordcraft-ui-egui",
+]
+
+[[package]]
+name = "officecraft-render"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "egui-wgpu",
+ "log",
+ "officecraft-core",
+ "serde_json",
+ "wgpu",
+]
+
+[[package]]
+name = "officecraft-shell"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "egui",
+ "image",
+ "log",
+ "officecraft-core",
+ "serde_json",
 ]
 
 [[package]]

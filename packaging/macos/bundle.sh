@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Builds Craftworks.app (macOS) into build/: the binary, Info.plist with the document types it
+# Builds OfficeCraft.app (macOS) into build/: the binary, Info.plist with the document types it
 # opens, an icon drawn by make_icon.py, and an ad-hoc signature. Developer ID signing and
 # notarisation are Phase 8.
 #
@@ -9,12 +9,12 @@ cd "$(dirname "$0")/../.."
 profile="${1:-measure}"
 # No licence outside the allowlist gets into a build (docs/licences.md, Phase 8.4).
 python3 scripts/licences.py
-cargo build -p craftworks --profile "$profile"
-# CRAFTWORKS_APP builds the bundle somewhere else (say, while build/Craftworks.app is running).
-app="${CRAFTWORKS_APP:-build/Craftworks.app}"
+cargo build -p officecraft --profile "$profile"
+# OFFICECRAFT_APP builds the bundle somewhere else (say, while build/OfficeCraft.app is running).
+app="${OFFICECRAFT_APP:-build/OfficeCraft.app}"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp "target/$profile/craftworks" "$app/Contents/MacOS/craftworks"
+cp "target/$profile/officecraft" "$app/Contents/MacOS/officecraft"
 
 # Licences: the report, and each Craft repo's own credits for what it bundles.
 mkdir -p "$app/Contents/Resources/Licenses"
@@ -26,9 +26,9 @@ for repo in wordcraft gridcraft deckcraft pdfcraft craft-fonts craft-libs; do
 done
 
 # The icon: our own artwork, drawn in code.
-iconset=$(mktemp -d)/Craftworks.iconset
+iconset=$(mktemp -d)/OfficeCraft.iconset
 python3 packaging/macos/make_icon.py "$iconset"
-iconutil -c icns "$iconset" -o "$app/Contents/Resources/Craftworks.icns"
+iconutil -c icns "$iconset" -o "$app/Contents/Resources/OfficeCraft.icns"
 
 version=$(grep -m1 '^version' Cargo.toml | sed 's/.*"\(.*\)"/\1/')
 doc_type() { # name, role, rank, UTIs…
@@ -43,11 +43,11 @@ cat <<PLIST
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key><string>Craftworks</string>
-  <key>CFBundleDisplayName</key><string>Craftworks</string>
-  <key>CFBundleIdentifier</key><string>dev.craftworks.Craftworks</string>
-  <key>CFBundleExecutable</key><string>craftworks</string>
-  <key>CFBundleIconFile</key><string>Craftworks</string>
+  <key>CFBundleName</key><string>OfficeCraft</string>
+  <key>CFBundleDisplayName</key><string>OfficeCraft</string>
+  <key>CFBundleIdentifier</key><string>dev.officecraft.OfficeCraft</string>
+  <key>CFBundleExecutable</key><string>officecraft</string>
+  <key>CFBundleIconFile</key><string>OfficeCraft</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$version</string>
   <key>CFBundleVersion</key><string>$version</string>
@@ -58,7 +58,7 @@ cat <<PLIST
   <key>CFBundleDocumentTypes</key>
   <array>
 PLIST
-# Office formats: Craftworks edits them (Alternate: it never takes over your default app).
+# Office formats: OfficeCraft edits them (Alternate: it never takes over your default app).
 doc_type "Document" Editor Alternate org.openxmlformats.wordprocessingml.document org.oasis-open.opendocument.text public.rtf
 doc_type "Legacy document (.doc)" Viewer Alternate com.microsoft.word.doc
 doc_type "Text, Markdown, HTML and TeX" Editor Alternate net.daringfireball.markdown public.html public.plain-text org.tug.tex

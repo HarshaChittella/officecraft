@@ -1,6 +1,6 @@
 # Phase 3 checks: input and keyboard routing
 
-Each Phase 3 "done when" item, how it's verified, and its status. **Auto** items run on every build (`cargo test`, or `craftworks --check DIR`). **Hand** items need a person at a real keyboard, trackpad and Finder, because they depend on macOS input sources that a test can't drive.
+Each Phase 3 "done when" item, how it's verified, and its status. **Auto** items run on every build (`cargo test`, or `officecraft --check DIR`). **Hand** items need a person at a real keyboard, trackpad and Finder, because they depend on macOS input sources that a test can't drive.
 
 Status as of 2026-11-14.
 
@@ -8,7 +8,7 @@ Status as of 2026-11-14.
 
 | Check | How | Status |
 |---|---|---|
-| ⌘T, ⌘W, ⌘O, ⌥⌘T, ⌃Tab, ⌃⇧Tab go to the window, never to the document (key press and release) | Auto: `craftworks-shell` `keys::tests::shortcuts_go_to_the_window…` | ✅ |
+| ⌘T, ⌘W, ⌘O, ⌥⌘T, ⌃Tab, ⌃⇧Tab go to the window, never to the document (key press and release) | Auto: `officecraft-shell` `keys::tests::shortcuts_go_to_the_window…` | ✅ |
 | No window shortcut takes an app's key except those taken on purpose (D26) | Auto: `keys::tests::window_shortcuts_collide_only_where_intended`, against all four apps' registries | ✅ (13 intended overlaps, listed in D26) |
 | Keys typed into the window reach the shown document | Auto: `--check` "keys typed into the window reach the shown document" (through the window's input hook) | ✅ |
 | ⌘T opens the new-tab popover; typing there stays out of the document | Auto: `--check` | ✅ |
@@ -54,7 +54,7 @@ Status as of 2026-11-14.
 ## How to run the hand checks
 
 ```bash
-cd ~/src/craftworks && cargo run -p craftworks --profile measure
+cd ~/src/officecraft && cargo run -p officecraft --profile measure
 ```
 
 Then work through the ⏳ rows. Add input sources in System Settings ▸ Keyboard ▸ Text Input if needed. Note anything that behaves differently from the standalone apps.

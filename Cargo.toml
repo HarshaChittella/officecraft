@@ -37,8 +37,8 @@ serde_json = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 log = "0.4"
 
-# Same lints as the Craft repos (AGENTS.md "Never crash"). craftworks-ffi and one module of
-# craftworks-render are the only places allowed `unsafe` (docs/decisions.md D9).
+# Same lints as the Craft repos (AGENTS.md "Never crash"). officecraft-ffi and one module of
+# officecraft-render are the only places allowed `unsafe` (docs/decisions.md D9).
 [workspace.lints.rust]
 unsafe_code = "forbid"
 

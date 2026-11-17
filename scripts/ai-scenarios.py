@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""The brief's three AI scenarios, end to end, through `craftworks mcp` (Phase 7).
+"""The brief's three AI scenarios, end to end, through `officecraft mcp` (Phase 7).
 
 This script plays the AI's part with fixed steps, so it can run unattended. The real
 acceptance is Claude Code doing the same with only this server connected (docs/ai.md).
 
-    scripts/ai-scenarios.py [--binary target/measure/craftworks] [--dir plan/ai-e2e] [--no-window]
+    scripts/ai-scenarios.py [--binary target/measure/officecraft] [--dir plan/ai-e2e] [--no-window]
 
 1. Read the Q3 figures from budget.xlsx and write them into a table in report.docx while it's
-   open in a Craftworks tab: the tab changes live, and Undo takes the change back. The same for
+   open in an OfficeCraft tab: the tab changes live, and Undo takes the change back. The same for
    an open PDF (H7): a page rotated live by PdfCraft's own tool, then undone.
 2. Build a deck from report.docx.
 3. Compare the amounts in contract.pdf with payments.xlsx.
@@ -63,7 +63,7 @@ class Mcp:
 
 
 def set_permission(project, perm):
-    path = os.path.join(project, ".craftworks", "project.json")
+    path = os.path.join(project, ".officecraft", "project.json")
     with open(path) as f:
         p = json.load(f)
     p.setdefault("ai", {})["permission"] = perm
@@ -81,7 +81,7 @@ def check(ok, what):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--binary", default=os.path.join(ROOT, "target/measure/craftworks"))
+    ap.add_argument("--binary", default=os.path.join(ROOT, "target/measure/officecraft"))
     ap.add_argument("--dir", default=os.path.join(ROOT, "plan/ai-e2e"))
     ap.add_argument("--no-window", action="store_true", help="skip the live part of scenario 1")
     a = ap.parse_args()
@@ -90,7 +90,7 @@ def main():
     shutil.rmtree(a.dir, ignore_errors=True)
     os.makedirs(project)
     os.makedirs(settings)
-    env = dict(os.environ, CRAFTWORKS_SETTINGS_DIR=settings)
+    env = dict(os.environ, OFFICECRAFT_SETTINGS_DIR=settings)
 
     # ── Fixtures, made by the connector (headless, edit_save) ──
     m = Mcp(a.binary, project, env)
@@ -120,7 +120,7 @@ def main():
     listed = m.tool("project_files")
     report_open = any(f["file"] == "report.docx" and f["open_in_window"] for f in listed["files"])
     if window:
-        check(report_open, "report.docx is open in a Craftworks tab")
+        check(report_open, "report.docx is open in an OfficeCraft tab")
     q3 = m.tool("sheet.read_range", file="budget.xlsx", range="A1:B5")
     rows = q3.get("values") if isinstance(q3, dict) else None
     check(bool(rows) and any("1350" in json.dumps(r) for r in rows), f"read Q3 figures from budget.xlsx ({json.dumps(rows)[:120] if rows else q3})")
@@ -188,7 +188,7 @@ def make_pdf(binary, project, env):
     """contract.pdf, made by PdfCraft through the connector (pdf.doc_create from text, then
     pdf.doc_save)."""
     m = Mcp(binary, project, env)
-    text = "Services agreement between Craftworks Ltd and Acme Services. Total fee: 2,550, paid in two instalments of 1,200 and 1,350."
+    text = "Services agreement between OfficeCraft Ltd and Acme Services. Total fee: 2,550, paid in two instalments of 1,200 and 1,350."
     made = m.tool("pdf.doc_create", **{"from": "text", "text": text})
     doc = made.get("doc") or made.get("id") if isinstance(made, dict) else None
     if doc is None:

@@ -1,4 +1,4 @@
-# Builds Craftworks on every push to main (and by hand): the Windows .exe as a downloadable
+# Builds OfficeCraft on every push to main (and by hand): the Windows .exe as a downloadable
 # zip, and the macOS build with its unit tests. Runs only for this repository's own pushes:
 # nothing here uses secrets.
 name: Build
@@ -24,14 +24,14 @@ jobs:
         run: rustup toolchain install stable --profile minimal && rustup default stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: cargo build --release -p craftworks
+        run: cargo build --release -p officecraft
       - name: Package
         shell: pwsh
         run: |
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.*)"').Matches[0].Groups[1].Value
-          $name = "Craftworks-$version-windows-x64"
+          $name = "OfficeCraft-$version-windows-x64"
           New-Item -ItemType Directory -Force "out/$name/Licenses" | Out-Null
-          Copy-Item target/release/craftworks.exe "out/$name/Craftworks.exe"
+          Copy-Item target/release/officecraft.exe "out/$name/OfficeCraft.exe"
           Copy-Item docs/licences.md, LICENSE-MIT, LICENSE-APACHE "out/$name/Licenses/"
           foreach ($repo in 'wordcraft','gridcraft','deckcraft','pdfcraft','craft-fonts','craft-libs') {
             Get-ChildItem "vendor/$repo" -File | Where-Object { $_.Name -match '^(ATTRIBUTION\..*|NOTICE|LICENSES\.toml)$' } |
@@ -57,6 +57,6 @@ jobs:
       - name: Free disk space
         run: df -h / && sudo rm -rf /Applications/Xcode_1[0-5]*.app /Users/runner/Library/Android 2>/dev/null; df -h /
       - name: Build
-        run: cargo build --profile measure -p craftworks
+        run: cargo build --profile measure -p officecraft
       - name: Unit tests
-        run: cargo test --profile measure -p craftworks-shell -p craftworks-core -p craftworks-mcp -p craftworks-platform -p craftworks
+        run: cargo test --profile measure -p officecraft-shell -p officecraft-core -p officecraft-mcp -p officecraft-platform -p officecraft

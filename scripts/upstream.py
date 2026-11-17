@@ -2,7 +2,7 @@
 """Follows the Craft apps' releases: WordCraft, GridCraft, DeckCraft and PdfCraft (docs/updates.md).
 
     upstream.py status [--json] [--installed FILE|-]
-        Each app's newest published release, against the versions Craftworks is built from
+        Each app's newest published release, against the versions OfficeCraft is built from
         (vendor/versions.json, or FILE, or the JSON on stdin with `-`: what the app embeds).
 
     upstream.py sync [--app ID]... [--to REF] [--no-install] [--skip-check] [--dry-run]
@@ -15,7 +15,7 @@
     upstream.py init
         Writes vendor/versions.json for what is checked out now.
 
-Lines starting with STAGE, LOG, INSTALLED and RESULT are for Craftworks, which runs this from its
+Lines starting with STAGE, LOG, INSTALLED and RESULT are for OfficeCraft, which runs this from its
 "Update available" pill (the local rebuild mode). Everything is also written to the log.
 Nothing here touches a remote: forks are not pushed.
 """
@@ -40,11 +40,11 @@ APPS = {
     "deckcraft": "DeckCraft",
     "pdfcraft": "PdfCraft",
 }
-BRANCH = "craftworks/hosted"
+BRANCH = "officecraft/hosted"
 CACHE = ROOT / "target/upstream"
 EGUI_URL = "https://github.com/storytold/egui.git"
-INSTALL_TO = Path("/Applications/Craftworks.app")
-LOG_DIR = Path.home() / "Library/Logs/Craftworks"
+INSTALL_TO = Path("/Applications/OfficeCraft.app")
+LOG_DIR = Path.home() / "Library/Logs/OfficeCraft"
 
 # Launched from the app, PATH is the system's bare one: find cargo and the developer tools.
 os.environ["PATH"] = os.pathsep.join([str(Path.home() / ".cargo/bin"), "/opt/homebrew/bin", "/usr/local/bin", os.environ.get("PATH", "/usr/bin:/bin")])
@@ -103,7 +103,7 @@ def version_tuple(v: str) -> tuple:
 def latest_release(app: str) -> dict:
     """The app's newest published, stable release, as craft-update chooses it."""
     # curl, not urllib: it uses the system's certificates, which some Pythons on macOS don't.
-    cmd = ["/usr/bin/curl", "-sS", "--fail-with-body", "--max-time", "20", "-H", "Accept: application/vnd.github+json", "-A", "craftworks-upstream"]
+    cmd = ["/usr/bin/curl", "-sS", "--fail-with-body", "--max-time", "20", "-H", "Accept: application/vnd.github+json", "-A", "officecraft-upstream"]
     token = os.environ.get("GITHUB_TOKEN")
     if token:
         cmd += ["-H", f"Authorization: Bearer {token}"]
@@ -129,7 +129,7 @@ def cmd_status(args) -> int:
     try:
         have = load_versions(args.installed)
     except (OSError, ValueError) as e:
-        return report_status({"ok": False, "error": f"Couldn't read the versions Craftworks is built from: {e}"}, args.json)
+        return report_status({"ok": False, "error": f"Couldn't read the versions OfficeCraft is built from: {e}"}, args.json)
     apps = []
     try:
         for app, name in APPS.items():
@@ -185,7 +185,7 @@ def release_source(repo: Path, tag: str) -> str:
 
 
 def cmd_init(_args) -> int:
-    data = {"note": "What Craftworks is built from. Written by scripts/upstream.py; see docs/updates.md.", "apps": {}, "craft_libs": git(ROOT / "vendor/craft-libs", "rev-parse", "HEAD"), "egui": egui_rev()}
+    data = {"note": "What OfficeCraft is built from. Written by scripts/upstream.py; see docs/updates.md.", "apps": {}, "craft_libs": git(ROOT / "vendor/craft-libs", "rev-parse", "HEAD"), "egui": egui_rev()}
     for app in APPS:
         repo = ROOT / "vendor" / app
         git(repo, "fetch", "-q", "--tags", "origin", "main", "release")
@@ -268,9 +268,9 @@ def sync(args, state: dict) -> str:
 
     at("check", "Looking for new releases")
     if git(ROOT, "status", "--porcelain", "--untracked-files=no"):
-        raise Failed("check", "the Craftworks checkout has uncommitted changes; commit or stash them first")
+        raise Failed("check", "the OfficeCraft checkout has uncommitted changes; commit or stash them first")
     if git(ROOT, "branch", "--show-current") != "main":
-        raise Failed("check", "the Craftworks checkout isn't on main")
+        raise Failed("check", "the OfficeCraft checkout isn't on main")
     have = load_versions()
     wanted = args.app or list(APPS)
     targets = {}
@@ -291,7 +291,7 @@ def sync(args, state: dict) -> str:
             target, label, version = release_source(repo, rel["tag"]), rel["tag"], rel["version"]
         targets[app] = {"target": target, "label": label, "version": version}
     if not targets:
-        return "Craftworks already has the newest releases"
+        return "OfficeCraft already has the newest releases"
     say("Releases to take: " + ", ".join(f"{APPS[a]} {t['label']}" for a, t in targets.items()))
     if args.dry_run:
         return "dry run: " + ", ".join(f"{APPS[a]} {t['label']}" for a, t in targets.items())
@@ -354,16 +354,16 @@ def sync(args, state: dict) -> str:
     new.update({"craft_libs": chosen_lib, "egui": chosen_egui})
     VERSIONS.write_text(json.dumps(new, indent=2) + "\n")
 
-    at("build", "Building Craftworks (several minutes)")
-    run(["cargo", "build", "--profile", "measure", "-p", "craftworks"])
+    at("build", "Building OfficeCraft (several minutes)")
+    run(["cargo", "build", "--profile", "measure", "-p", "officecraft"])
     at("test", "Running the tests")
-    run(["cargo", "test", "-p", "craftworks-shell", "-p", "craftworks-core", "-p", "craftworks"])
+    run(["cargo", "test", "-p", "officecraft-shell", "-p", "officecraft-core", "-p", "officecraft"])
     if not args.skip_check:
         for mode in ("light", "dark"):
             at("check", f"Running the acceptance check ({mode}): a test window opens for a few minutes")
             out = CACHE / f"check-{dt.datetime.now():%Y%m%d-%H%M%S}-{mode}"
             out.mkdir(parents=True)
-            run([str(ROOT / "target/measure/craftworks"), "--check", str(out), "--appearance", mode], check=False)
+            run([str(ROOT / "target/measure/officecraft"), "--check", str(out), "--appearance", mode], check=False)
             report = next(out.glob("report*.txt"), None)
             text = report.read_text() if report else ""
             if "ALL PASS" not in text:
@@ -377,18 +377,18 @@ def sync(args, state: dict) -> str:
             rollback(state)
             return f"rehearsal passed ({summary}); the checkout is back as it was"
     else:
-        at("install", "Packaging and installing Craftworks")
-        app_dir = ROOT / "build/next/Craftworks.app"
-        env = dict(os.environ, CRAFTWORKS_APP=str(app_dir.relative_to(ROOT)))
+        at("install", "Packaging and installing OfficeCraft")
+        app_dir = ROOT / "build/next/OfficeCraft.app"
+        env = dict(os.environ, OFFICECRAFT_APP=str(app_dir.relative_to(ROOT)))
         subprocess.run(["packaging/macos/bundle.sh", "release"], cwd=ROOT, env=env, check=True, stdout=log_file, stderr=subprocess.STDOUT)
         run(["codesign", "--verify", "--deep", str(app_dir)])
-        # Fine while Craftworks runs: rsync replaces each file by renaming a new one over it.
+        # Fine while OfficeCraft runs: rsync replaces each file by renaming a new one over it.
         run(["rsync", "-a", "--delete", f"{app_dir}/", f"{INSTALL_TO}/"])
         run(["touch", str(INSTALL_TO)])
         run(["/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister", "-f", str(INSTALL_TO)], check=False)
         say(f"INSTALLED {INSTALL_TO}")
 
-    at("commit", "Recording what Craftworks is built from")
+    at("commit", "Recording what OfficeCraft is built from")
     git(ROOT, "add", "Cargo.toml", "Cargo.lock", "vendor/versions.json", "vendor/craft-libs", *[f"vendor/{a}" for a in targets])
     git(ROOT, "commit", "-q", "-m", f"Sync upstream: {summary}\n\nWritten by scripts/upstream.py sync (docs/updates.md).")
     for app in targets:

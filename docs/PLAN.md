@@ -1,4 +1,4 @@
-# Craftworks plan
+# OfficeCraft plan
 
 Status: **approved** 2026-11-14. **Phases 0–2 and 4–6 done**, Phase 3 done except its hand checks (Phase 5: printing on paper unverified, no printer), 2026-11-14 (decisions D1–D29; D25 look and feel awaits the owner's confirmation).
 **Architecture changed 2026-11-14 (D23): the shell is Rust-only (eframe/winit), not Swift.** Phases 2–8 below are rewritten for it; the look and feel is specified in [design.md](design.md). Phase 2 is next. Xcode is not required.
@@ -37,7 +37,7 @@ Read at HEAD on 2026-11-14: wordcraft `514085c`, gridcraft `c0ee120`, deckcraft 
 
 1. Rust: installed 2026-11-14 with the official rustup installer (stable 1.100.0, targets `aarch64-apple-darwin` and `x86_64-apple-darwin`).
 2. Xcode: **no longer required** (D23). Packaging uses `codesign`, `hdiutil` and `notarytool`, which come with the Command Line Tools, as in the Craft repos. Xcode stays optional for the Metal debugger and Instruments.
-3. Location: `~/src/craftworks` (D10).
+3. Location: `~/src/officecraft` (D10).
 4. Forks: under the owner's GitHub account, added as remote `fork` (D15).
 
 ---
@@ -48,7 +48,7 @@ Tasks
 - 0.1 `git init`; add `.gitignore` (`target/`, `plan/`, `macos/build/`, `*.xcframework`).
 - 0.2 Add submodules `vendor/{wordcraft,gridcraft,deckcraft,pdfcraft}` at the SHAs of the day, and the optional build inputs `vendor/craft-fonts` and `vendor/craft-i18n`. Write the SHAs into `docs/decisions.md`.
 - 0.3 Root `Cargo.toml`: a workspace with members `crates/*` and `apps/*` only. Vendored repos are path dependencies, not members. Add the brief's patch block with egui rev `725a39f` (D7), and copy the shared lints (`unsafe_code = "forbid"` and the clippy denials) into `[workspace.lints]`.
-- 0.4 `crates/craftworks-core`, a stub that depends on the four `*-ui-egui` crates and the `*-engine` crates. `cargo check` should pass.
+- 0.4 `crates/officecraft-core`, a stub that depends on the four `*-ui-egui` crates and the `*-engine` crates. `cargo check` should pass.
 - 0.5 `.cargo/config.toml`: `CRAFT_FONTS_DIR` and `CRAFT_I18N_DIR` pointing into `vendor/`. Pick one craft-i18n revision that builds and tests for WordCraft and PdfCraft (finding 11), and record the reasoning.
 - 0.6 `scripts/upstream-tests.sh`: run each repo's own `cargo test --workspace` **inside its vendored checkout**, with the shared pins applied through a generated `[patch]` override (`--config`), so we test their code on our pins without editing their files. Start with PdfCraft's UI tests (`pdfcraft-ui-egui`, `egui_kittest`).
 - 0.7 Align craft-libs revisions where one revision satisfies every user: try `[patch."https://github.com/storytold/craft-libs"]` per crate, keep each one that builds and tests, and revert the rest.
@@ -61,7 +61,7 @@ Done when: `cargo check` passes for the workspace; every upstream suite passes, 
 
 Tasks
 - 1.1 Upstream hosted-mode patches H1–H6 (upstream-patches.md), each a small branch in our fork, with each repo's own tests passing (`cargo xtask ci` where it runs).
-- 1.2 `craftworks-core::Editor` trait. It covers **one engine instance** that holds many documents (D2):
+- 1.2 `officecraft-core::Editor` trait. It covers **one engine instance** that holds many documents (D2):
   - `kind()`, `documents() -> Vec<DocInfo{id, title, path, dirty}>`, `activate(doc)`
   - `logic(ctx)`, `ui(ui)`, `raw_input_hook(ctx, &mut RawInput)`
   - `new_document()`, `open(path) -> DocId`, `save(doc)`, `save_as(doc, path)`
@@ -89,10 +89,10 @@ Done when: the harness opens one document of each type in tabs; switching tabs s
 
 ## Phase 2: The app window and its chrome
 
-The harness becomes the real app, `apps/craftworks`: one eframe/winit window (wgpu) with our chrome around the four engines. The chrome follows [design.md](design.md).
+The harness becomes the real app, `apps/officecraft`: one eframe/winit window (wgpu) with our chrome around the four engines. The chrome follows [design.md](design.md).
 
 Tasks
-- 2.1 `crates/craftworks-shell`: the shell's UI, separate from the engines:
+- 2.1 `crates/officecraft-shell`: the shell's UI, separate from the engines:
   - design tokens (colours light and dark, type scale, spacing, radii, motion), and an icon set drawn in code
   - the tab strip, the new-tab page, the start page and the status toasts.
   Everything is egui, with no editor code (brief §0).
@@ -109,7 +109,7 @@ Tasks
   - recent files with type icon, folder and relative time, filtered as you type
   - fully usable from the keyboard: arrows, Enter, Esc.
   - With no tabs open, the same panel is the start page.
-- 2.5 Rendering: the harness's texture path (`craftworks-render`) becomes production code. Each engine paints into its own texture, which the window composites, so a tab switch is a texture swap. The full-window extra blit is measured and kept under 1 ms. Repaint uses each engine's `repaint_delay`, so an idle window draws nothing. Background engines tick at 4 Hz (D4).
+- 2.5 Rendering: the harness's texture path (`officecraft-render`) becomes production code. Each engine paints into its own texture, which the window composites, so a tab switch is a texture swap. The full-window extra blit is measured and kept under 1 ms. Repaint uses each engine's `repaint_delay`, so an idle window draws nothing. Background engines tick at 4 Hz (D4).
 - 2.6 One appearance: the window follows the system's light or dark mode, and each engine is told to use the same mode at startup and whenever it changes. A Document tab never shows dark while a Sheet tab shows light (Phase 1 screenshots show that problem). Each app's theme preference is set through its own option or command. Where one is missing, that's an upstream patch.
 - 2.7 Retina and resize: the scale changes when the window moves between displays; live resize redraws every frame without stutter; frame times are logged at 60 Hz and on a 120 Hz display.
 
@@ -118,9 +118,9 @@ Done when:
 - One tab of each kind can be made and switched between, with the chrome matching design.md in light and dark. There are screenshots of both.
 - Resizing is smooth, with frame times recorded.
 - An idle window uses no CPU (Activity Monitor shows 0%).
-- The Phase 1 checks still pass, run as `craftworks --check DIR`.
+- The Phase 1 checks still pass, run as `officecraft --check DIR`.
 
-**Result (2026-11-14): all met, light and dark.** `craftworks --check DIR --appearance light|dark` on an optimised build reports ALL PASS, 31 checks each ([light report](screenshots/phase2/report-light.txt), [dark report](screenshots/phase2/report-dark.txt)):
+**Result (2026-11-14): all met, light and dark.** `officecraft --check DIR --appearance light|dark` on an optimised build reports ALL PASS, 31 checks each ([light report](screenshots/phase2/report-light.txt), [dark report](screenshots/phase2/report-dark.txt)):
 - Chrome: start page, tab strip in the title row (sized around the traffic lights, 32 pt on macOS 27), ⌘T new-tab popover with cards and filterable recent files, toasts. Screenshots: [start page](screenshots/phase2/start-page-light.png), [new tab](screenshots/phase2/new-tab-light.png), [Document](screenshots/phase2/tab-document-light.png) / [dark](screenshots/phase2/tab-document-dark.png), [Sheet](screenshots/phase2/tab-sheet-light.png) / [dark](screenshots/phase2/tab-sheet-dark.png), [Presentation](screenshots/phase2/tab-presentation-light.png), [PDF](screenshots/phase2/tab-pdf-dark.png), [Save prompt](screenshots/phase2/dirty-close-prompt-dark.png).
 - One appearance: every app's chrome measures light (luminance ≥ 0.90) or dark (≤ 0.18) as the window does (D27).
 - Every Phase 1 check still passes: 12 switches with no font rebuild, edit and save in every tab, typing through the input path, the app's own Save prompt.
@@ -136,7 +136,7 @@ Done when:
 The Craft apps' winit fork already handles macOS input (Retina, precise trackpad scroll, pinch, IME through `NSTextInputClient`, dead keys). This phase makes sure all of it reaches the right engine intact.
 
 Tasks
-- 3.1 Shortcut routing table (`craftworks-shell::keys`): the shell takes only its own shortcuts (2.3, plus ⌘\ for the sidebar and ⌘⇧O for Quick Open), and every other key goes to the active engine. A test loads each app's keymap (`Kind`'s command catalogue) and fails if a shell shortcut collides with an app's.
+- 3.1 Shortcut routing table (`officecraft-shell::keys`): the shell takes only its own shortcuts (2.3, plus ⌘\ for the sidebar and ⌘⇧O for Quick Open), and every other key goes to the active engine. A test loads each app's keymap (`Kind`'s command catalogue) and fails if a shell shortcut collides with an app's.
 - 3.2 IME through the embedding: the engine's `IMEOutput` (owner, generation, rects) reaches the window unchanged except for the offset, and IME events reach the engine. Manual checks: Hindi (Devanagari), Japanese Kana–Kanji, emoji picker (⌃⌘Space), dead keys (⌥E E), in each engine.
 - 3.3 Pointer details: precise versus line scrolling and momentum, pinch → `Zoom`, hover leaving the engine area, drags that start in the engine and end over the tab strip, and the cursor icon.
 - 3.4 Drag and drop: files dropped on a tab or the strip open in tabs (routing 1.4); files dropped on the engine area go to the engine (for example, an image into a document).
@@ -145,7 +145,7 @@ Tasks
 Done when: typing, selection, ribbon clicks, ⌘B/⌘Z/⌘S, GridCraft arrows, IME composition and dragged-in files behave as in the standalone apps. Each check is ticked in `docs/phase3-checks.md`.
 
 **Result (2026-11-14): the automated part is done; the hand checks wait for a person at the keyboard** ([checklist](phase3-checks.md)).
-- `craftworks --check` reports ALL PASS in light and dark. That includes the new routing stage, which goes through the window's real input hook: typing reaches the document, ⌘T opens the popover and its typing stays out of the document, ⌃Tab, ⌘W, and ⌥⌘T reopening from the file.
+- `officecraft --check` reports ALL PASS in light and dark. That includes the new routing stage, which goes through the window's real input hook: typing reaches the document, ⌘T opens the popover and its typing stays out of the document, ⌃Tab, ⌘W, and ⌥⌘T reopening from the file.
 - Input tests drive the real `EngineHost` path: ⌘A/⌘B/⌘Z in WordCraft; Japanese, Hindi, emoji and dead-key input in WordCraft; GridCraft arrows, typing and composition; the caret reported for the input method.
 - Fixed: the window's egui no longer sees the document's keys; a stale focus left by the popover no longer holds the keyboard; wheel and pinch over the tab strip no longer scroll the page; dropped documents open in tabs instead of going to the shown app too.
 - Found upstream: GridCraft composes only in its cell editor (D30); WordCraft leaves focus off the page after its Save prompt (D31).
@@ -158,7 +158,7 @@ Tasks
   - File, Edit, View and Window are ours.
   - A menu per engine (for example, Format) is built from that engine's command catalogue and rebuilt when the active tab's kind changes.
   - Edit's Undo, Redo, Cut, Copy and Paste go to the active engine's own commands.
-- 4.2 Session restore: open tabs, their order, the active tab and window geometry go in `~/Library/Application Support/Craftworks/session.json`. Missing files are skipped with a toast.
+- 4.2 Session restore: open tabs, their order, the active tab and window geometry go in `~/Library/Application Support/OfficeCraft/session.json`. Missing files are skipped with a toast.
 - 4.3 Quit (⌘Q, Dock, logout): goes through every tab with unsaved changes one at a time, using each app's own prompt (D20). Cancel stops the quit. Built on `craft-quit` where it fits.
 - 4.4 App bundle and file associations: `packaging/macos/` scripts, modelled on the Craft repos' scripts.
   - `Info.plist` with document types and UTIs for every format in brief §1, and the app icon.
@@ -168,21 +168,21 @@ Done when: someone new to the app makes and switches between all four types with
 
 **Result (2026-11-14): done; two things are left to you (below).**
 - **Menu bar** (`craft-menu`, D32):
-  - Craftworks (Quit), File (New Tab, New Document/Sheet/Presentation, Open…, Open Recent, Close Tab, Reopen Closed Tab, Save, Save As…, Print…), Edit (Undo, Redo, Cut, Copy, Paste, Select All, Find…), View (next and previous tab), a menu for the shown kind (Format for documents, sheets and presentations; Document for PDFs), Window (the tabs), and Help.
+  - OfficeCraft (Quit), File (New Tab, New Document/Sheet/Presentation, Open…, Open Recent, Close Tab, Reopen Closed Tab, Save, Save As…, Print…), Edit (Undo, Redo, Cut, Copy, Paste, Select All, Find…), View (next and previous tab), a menu for the shown kind (Format for documents, sheets and presentations; Document for PDFs), Window (the tabs), and Help.
   - `--check` clicks through it: Format ▸ Bold then Edit ▸ Undo in WordCraft, Window ▸ a tab, Document ▸ Rotate Page in PdfCraft.
   - A test checks that every shortcut a menu sends is one the shown app binds.
 - **Quit** (⌘Q, Dock, logout, the close button), D33: the tabs open at that moment are saved, then each tab with unsaved changes gets its app's own prompt. Cancel stops the quit and keeps the edit; Don't Save lets it finish; the process ends with AppKit's `terminate` (craft-quit). `--check` covers Cancel and Don't Save.
 - **Session restore:** `session.json` is saved whenever the tabs change, and restored at a launch without files. Missing files are reported in a toast.
-- **App bundle:** `packaging/macos/bundle.sh` builds `build/Craftworks.app` with document types and UTIs for every format, an icon drawn in code (`make_icon.py`) and an ad-hoc signature. `scripts/finder-open-test.sh` passes 3 of 3: four files sent the way Finder sends them become four tabs; the Dock's Quit ends the app; a relaunch restores the tabs whose files still exist.
+- **App bundle:** `packaging/macos/bundle.sh` builds `build/OfficeCraft.app` with document types and UTIs for every format, an icon drawn in code (`make_icon.py`) and an ad-hoc signature. `scripts/finder-open-test.sh` passes 3 of 3: four files sent the way Finder sends them become four tabs; the Dock's Quit ends the app; a relaunch restores the tabs whose files still exist.
 - `--check`: 42 checks, ALL PASS in light and dark. 72 unit and integration tests pass, plus 1 ignored (upstream, D31).
 - **Left to you:**
-  - Making Craftworks the *default* app for these types (Finder ▸ Get Info ▸ Open with ▸ Change All). It's a system setting, so I didn't change it. The bundle declares the types as an Alternate handler, so Open With works now.
+  - Making OfficeCraft the *default* app for these types (Finder ▸ Get Info ▸ Open with ▸ Change All). It's a system setting, so I didn't change it. The bundle declares the types as an Alternate handler, so Open With works now.
   - A look at the menu bar itself: it's outside the window, so the screenshots can't show it.
 
 ## Phase 5: Services in Rust
 
 Tasks
-- 5.1 `crates/craftworks-platform`: the `Services` callbacks each app asks for, built from the same safe crates the Craft binaries use: `arboard` for the clipboard (text, HTML, RTF, images), `rfd` for file panels, `craft-print` for printing, and `NSWorkspace`/`open` for URLs. **No `unsafe`** (D24). Where a binary's own module (`clipboard.rs`, `print.rs`) does what we need, ask upstream to move it into a library crate we can depend on, rather than copying it.
+- 5.1 `crates/officecraft-platform`: the `Services` callbacks each app asks for, built from the same safe crates the Craft binaries use: `arboard` for the clipboard (text, HTML, RTF, images), `rfd` for file panels, `craft-print` for printing, and `NSWorkspace`/`open` for URLs. **No `unsafe`** (D24). Where a binary's own module (`clipboard.rs`, `print.rs`) does what we need, ask upstream to move it into a library crate we can depend on, rather than copying it.
 - 5.2 Pasteboard formats as each app expects them (each app's own "copied from me" marker included), so a copy in one tab pastes with formatting in another.
 - 5.3 Printing for all four kinds: the app produces PDF bytes and `craft-print` prints them.
 - 5.4 Cross-tab paste tests: a sheet range pasted into a document becomes a table, and document text pasted into a slide keeps formatting. These are automated through `run_command` and the clipboard, then checked once by hand.
@@ -190,14 +190,14 @@ Tasks
 Done when: copy and paste between tabs keeps formatting in both test cases, and printing works for all four kinds.
 
 **Result (2026-11-14): done except printing on paper, which this Mac can't show (no printer).**
-- **`crates/craftworks-platform`** (D35): the `Services` for WordCraft, GridCraft and DeckCraft, with no `unsafe`.
+- **`crates/officecraft-platform`** (D35): the `Services` for WordCraft, GridCraft and DeckCraft, with no `unsafe`.
   - Clipboard: the macOS pasteboard through objc2's safe calls (plain text, HTML, RTF, MathML), and `arboard` for pictures. Each app has its own "this is my copy" token, so a copy in one tab is never mistaken for the pasting app's own (D36).
   - File panels: `rfd`. Printing: `craft-print` on a worker thread. Links: only web, mail and file links open (D37).
   - PdfCraft keeps its own panels, clipboard and printing (D12).
 - **Cross-tab paste** (5.4), automated twice:
-  - `cargo test -p craftworks-platform --test cross_tab_paste`: a GridCraft range pasted into WordCraft becomes a 3×2 table; bold WordCraft text pasted into DeckCraft becomes a text box with bold runs.
+  - `cargo test -p officecraft-platform --test cross_tab_paste`: a GridCraft range pasted into WordCraft becomes a 3×2 table; bold WordCraft text pasted into DeckCraft becomes a text box with bold runs.
   - `--check`: ⌘C on a sheet range, then ⌘V in the document tab, gives a table (screenshot `pasted-table-*.png`). The check uses a private clipboard, never yours.
-- **Printing** (5.3): WordCraft and GridCraft hand their PDF to `craft-print`; DeckCraft's Print exports a PDF that opens in a Craftworks PDF tab, where PdfCraft prints it; PdfCraft prints its own. `--check` covers DeckCraft's route. A test covers printer discovery and that a missing printer is an error, not a crash.
+- **Printing** (5.3): WordCraft and GridCraft hand their PDF to `craft-print`; DeckCraft's Print exports a PDF that opens in an OfficeCraft PDF tab, where PdfCraft prints it; PdfCraft prints its own. `--check` covers DeckCraft's route. A test covers printer discovery and that a missing printer is an error, not a crash.
 - The WordCraft binary's own clipboard and print modules aren't a library, so instead of copying them (5.1), the glue is written against the `Services` contract each app documents. Asking upstream to move them into a library is still open.
 - `--check`: 45 checks, ALL PASS in light and dark (new: ⌘C/⌘V sheet → document, DeckCraft Print → PDF tab). 80 unit and integration tests pass, plus 1 ignored (upstream, D31). fmt and clippy `-D warnings` clean.
 - The check itself got steadier:
@@ -212,27 +212,27 @@ Done when: copy and paste between tabs keeps formatting in both test cases, and 
 ## Phase 6: Projects
 
 Tasks
-- 6.1 `craftworks-core::project`: a folder plus `.craftworks/project.json` (`name`, `pinned`, `ai.instructions`, `ai.permission` = `read` | `edit` | `edit_save`), with a versioned schema and tests.
-- 6.2 Sidebar (`craftworks-shell`, see design.md "Sidebar"):
+- 6.1 `officecraft-core::project`: a folder plus `.officecraft/project.json` (`name`, `pinned`, `ai.instructions`, `ai.permission` = `read` | `edit` | `edit_save`), with a versioned schema and tests.
+- 6.2 Sidebar (`officecraft-shell`, see design.md "Sidebar"):
   - collapsible with ⌃⌘S (D40; the brief's ⌘\\ is PdfCraft's Split View), resizable
   - project switcher, Pinned and Files sections, and a file tree filtered to supported types with type icons
   - new file in the project, rename, Reveal in Finder
   - a file watcher that refreshes the tree (`notify`, if it's already in the Craft graph; otherwise ask first).
-- 6.3 Text index (`craftworks-core::index`): text from each engine's headless reader (Word text, sheet cell values, slide text and notes, PDF text), held in an in-memory inverted index that updates on file changes. No new dependency: this is a simple token index.
+- 6.3 Text index (`officecraft-core::index`): text from each engine's headless reader (Word text, sheet cell values, slide text and notes, PDF text), held in an in-memory inverted index that updates on file changes. No new dependency: this is a simple token index.
 - 6.4 Project search UI: a search field in the sidebar; clicking a result opens the file at the hit where the engine supports it.
 
 Done when: you can create a project, add one of each type, open them from the sidebar, and search across all of them.
 
 **Result (2026-11-16): done; a look by hand is left to you (below).**
-- **Projects** (`craftworks-core::project`, D38): `.craftworks/project.json` with `version`, `name`, `pinned`, `ai.instructions` and `ai.permission` (`read`, the default and what anything unknown means; `edit`; `edit_save`). Pins can't point outside the folder. A file from a newer Craftworks is shown but never overwritten. The known projects and the open one are kept in `projects.json` in the settings folder.
-- **Sidebar** (`craftworks-shell::sidebar`):
+- **Projects** (`officecraft-core::project`, D38): `.officecraft/project.json` with `version`, `name`, `pinned`, `ai.instructions` and `ai.permission` (`read`, the default and what anything unknown means; `edit`; `edit_save`). Pins can't point outside the folder. A file from a newer OfficeCraft is shown but never overwritten. The known projects and the open one are kept in `projects.json` in the settings folder.
+- **Sidebar** (`officecraft-shell::sidebar`):
   - ⌃⌘S shows or hides it (D40, the macOS Show Sidebar key); it's resizable from 200 to 400 pt.
   - The switcher has the known projects, New Project…, Open Folder as Project… and "Show all files".
   - Below the switcher: a search field, then Pinned and Files. The tree shows supported documents with kind icons, and long names end in "…".
   - The right-click menu has New Document/Sheet/Presentation Here, Rename… (refused while the file is open in a tab), Reveal in Finder, and Pin.
-- **Watcher** (`craftworks-core::tree`, D39): rescans every 2 s on a background thread and only reports changes. There's no new dependency: `notify` isn't in the Craft apps' set.
-- **Index** (`craftworks-core::index`): each file is read with its own app's reader (WordCraft's `open_path`, GridCraft's `open_bytes`, DeckCraft's `read_presentation_file` including tables and notes, and PdfCraft's text layer), into an in-memory token index on a background thread. Every word must match and the last also matches as a prefix. Hits are paragraphs, cells, slides or pages.
-- **Opening a hit** goes to it. The document runs Find for the word; the sheet selects the cell; the presentation goes to the slide; the PDF goes to the page (a Craftworks command, `craftworks.goToPage`, on PdfCraft's own `go_to_page`).
+- **Watcher** (`officecraft-core::tree`, D39): rescans every 2 s on a background thread and only reports changes. There's no new dependency: `notify` isn't in the Craft apps' set.
+- **Index** (`officecraft-core::index`): each file is read with its own app's reader (WordCraft's `open_path`, GridCraft's `open_bytes`, DeckCraft's `read_presentation_file` including tables and notes, and PdfCraft's text layer), into an in-memory token index on a background thread. Every word must match and the last also matches as a prefix. Hits are paragraphs, cells, slides or pages.
+- **Opening a hit** goes to it. The document runs Find for the word; the sheet selects the cell; the presentation goes to the slide; the PDF goes to the page (an OfficeCraft command, `officecraft.goToPage`, on PdfCraft's own `go_to_page`).
 - **Search shortcut:** ⌃⇧F. The design's ⇧⌘F is WordCraft's Font and PdfCraft's Advanced Search, and ⌥⌘F is WordCraft's footnote.
 - The collision test now treats `\` and `Backslash` as one key. It had been missing punctuation clashes: ⌘\, the brief's sidebar key, is PdfCraft's Split View, so the sidebar uses ⌃⌘S (owner's choice, D40).
 - `--check`: 54 checks, ALL PASS in light and dark. The new ones:
@@ -251,18 +251,18 @@ Done when: you can create a project, add one of each type, open them from the si
 Each open project is a tab group, as in Chrome, and the sidebar stays (D41).
 
 **Result (2026-11-16): done.**
-- **Model** (`craftworks-core::tabs`): groups with a key (the project folder), name, colour and collapsed flag.
+- **Model** (`officecraft-core::tabs`): groups with a key (the project folder), name, colour and collapsed flag.
   - A group's tabs always sit together.
   - A tab opened from inside a group goes after the group.
   - A dragged tab stays inside its own group, and an ungrouped tab can't be dropped into the middle of one.
   - Collapsing the front tab's group moves to the nearest tab outside it; ⌃Tab skips hidden tabs; showing a tab expands its group.
-- **Strip** (`craftworks-shell::tabs`):
+- **Strip** (`officecraft-shell::tabs`):
   - a coloured label before each group's tabs and a line of its colour under them;
   - a click on the label collapses or expands the group, and a collapsed label shows how many tabs it hides;
   - the label's menu has Rename, nine colours, Collapse/Expand, Show in Sidebar and Close Project.
   
   The layout now uses measured slots instead of equal widths. All nine colours pass WCAG AA for the label text in both modes.
-- **Projects** (`apps/craftworks/src/projects.rs`):
+- **Projects** (`apps/officecraft/src/projects.rs`):
   - several projects can be open at once, each with its own watcher and index;
   - a tab joins the group of the project that holds its file (the innermost, if folders nest);
   - the sidebar follows the front tab's project and stays on one picked in it;
@@ -283,13 +283,13 @@ Each open project is a tab group, as in Chrome, and the sidebar stays (D41).
 
 ## Phase 6c: Menus that follow the front tab (owner's request, 2026-11-16)
 
-Each app's own menus and shortcuts in the macOS menu bar, swapped when another kind of tab comes to the front (D42). Craftworks keeps only its app menu, File's tab items and Window.
+Each app's own menus and shortcuts in the macOS menu bar, swapped when another kind of tab comes to the front (D42). OfficeCraft keeps only its app menu, File's tab items and Window.
 - PdfCraft: its own `menus.rs` (in its library).
 - WordCraft, DeckCraft, GridCraft: built from each app's command catalogue (title, ribbon location, shortcut), so they match the ribbons. GridCraft's hand-made menu lives in its binary, which we can't link.
 - Done when: the menu bar shows each app's menus with its shortcuts, a test checks that every menu shortcut is one that app binds, and `--check` runs an item from each app's menus.
 
 **Result (2026-11-16): done.**
-- `craftworks-core::catalog`: each app's commands with label, ribbon place, shortcut and whether they need arguments (a menu click can't give any, so those are left out unless they have a shortcut).
+- `officecraft-core::catalog`: each app's commands with label, ribbon place, shortcut and whether they need arguments (a menu click can't give any, so those are left out unless they have a shortcut).
 - **Ribbon tabs map onto Mac menus:** File, Edit, View, Insert, Format, Table, Data, Formulas, Arrange, Slide Show, Tools.
   - Home's Clipboard and Editing groups go in Edit.
   - Contextual tabs (Picture Format, Chart Design…) are submenus.
@@ -311,7 +311,7 @@ Each app's own menus and shortcuts in the macOS menu bar, swapped when another k
 ## Phase 7: One AI connector
 
 Tasks
-- 7.1 `craftworks-mcp` (library):
+- 7.1 `officecraft-mcp` (library):
   - merges `tool_definitions` from the four engines with prefixes `doc.`, `sheet.`, `deck.`, `pdf.`
   - dispatches each call to that engine's `call_tool` or `Automation::call`
   - project tools: `project_files`, `project_search`, `project_read`, `project_open`.
@@ -321,14 +321,14 @@ Tasks
   - a project-root jail for every path (canonicalise, refuse symlinks that leave the root, like PdfCraft's `--root`)
   - the permissions from `project.json`
   - a **review panel** in the shell listing files the AI changed; nothing is saved until you approve. Documents use WordCraft track changes where available.
-- 7.5 `apps/craftworks-cli`: `craftworks mcp --project <dir>` and `craftworks open <file>`. Docs give a one-line config for Claude Code (`claude mcp add craftworks -- craftworks mcp --project .`) and a JSON snippet for Claude Desktop.
+- 7.5 `apps/officecraft-cli`: `officecraft mcp --project <dir>` and `officecraft open <file>`. Docs give a one-line config for Claude Code (`claude mcp add officecraft -- officecraft mcp --project .`) and a JSON snippet for Claude Desktop.
 - 7.6 End-to-end scripts for the three scenarios in the brief, with fixture files we generate ourselves.
 - 7.7 **Last:** live AI edits to open PDFs: upstream H7 plus a PdfCraft `Live` backend (finding 14, D14).
 
 Done when: with only this server connected, Claude Code completes the three brief scenarios, and in scenario 1 the open `report.docx` tab changes live and the change can be undone.
 
 **Result (2026-11-16): 7.1–7.7 done; the run with Claude Code itself is yours.** Setup and use are in `docs/ai.md`.
-- **7.1–7.2** `crates/craftworks-mcp`:
+- **7.1–7.2** `crates/officecraft-mcp`:
   - one MCP server (JSON-RPC over stdio, no new dependency);
   - WordCraft's, GridCraft's and DeckCraft's own tools prefixed `doc.`, `sheet.`, `deck.`, each with a `file` argument;
   - PdfCraft's own MCP server inside it as `pdf.*`, confined to the project by its own root;
@@ -343,11 +343,11 @@ Done when: with only this server connected, Claude Code completes the three brie
   - Review: the AI pill in the title row, and a panel with Keep (save) or Undo per file.
   - WordCraft's and GridCraft's AutoSave pause while edits wait for review (D45). Without that, WordCraft had already saved the AI's edit.
   - Not done: WordCraft track changes for AI edits. Undo per file covers it for now.
-- **7.5:** the same binary is the CLI: `craftworks mcp --project DIR [--all-tools]` and `craftworks open FILE…` (D43). There's no separate `apps/craftworks-cli`.
+- **7.5:** the same binary is the CLI: `officecraft mcp --project DIR [--all-tools]` and `officecraft open FILE…` (D43). There's no separate `apps/officecraft-cli`.
 - **7.6:** `scripts/ai-scenarios.py` runs the brief's three scenarios through the real binary with fixture files the connector makes itself: **9/9 pass**. Scenario 1 has a real window with `report.docx` open: the table appears in the tab, the `edit` project doesn't save it, and Undo takes it back. `--check` has an AI stage (a stand-in AI on its own thread, through the real connector): read the sheet, write a table into the open document, nothing saved after 4 s, the review panel lists it, its Undo takes it back. Screenshot `ai-review-*.png`.
 - **Tests:** 71 `--check` checks pass in light and dark; 107 tests pass, plus 2 ignored.
 - **7.7, live PDF edits (H7):**
-  - **The hook:** a small upstream change in the PdfCraft fork (`craftworks/hosted`, `2bd8bd08c`). `Automation::swap_session` lets a host lend its session to PdfCraft's tools for one call, and `McpServer::automation_mut` reaches it. It has a test in PdfCraft's own suite (65/65 pass).
+  - **The hook:** a small upstream change in the PdfCraft fork (`officecraft/hosted`, `2bd8bd08c`). `Automation::swap_session` lets a host lend its session to PdfCraft's tools for one call, and `McpServer::automation_mut` reaches it. It has a test in PdfCraft's own suite (65/65 pass).
   - **The adapter:** the PDF adapter's `Editor::control` runs `tools/call` on the open documents with the tab's session lent.
   - **The tools:** `pdf.*` tools take `file`. When that PDF is open, the edit happens in its tab; under `edit`, an edit opens it there for review.
   - **Proven by:** a core test (rotate live, dirty, PdfCraft's Undo restores), a `--check` stage (review panel Undo) and two more scenario-script checks (11/11 pass).
@@ -372,11 +372,11 @@ Done when: a signed, notarised `.dmg` installs and runs on a clean Mac of each a
   - View ▸ Interface Text Size (Default, Large, Larger) scales the chrome's text and is kept in `prefs.json`. Reading macOS's own preferred text size needs `unsafe` AppKit calls, so this is an app setting.
   - All three are covered by `--check`.
 - **8.3:**
-  - Crash reports in `~/Library/Logs/Craftworks`: the panic, thread, backtrace and recent log lines. The next launch offers to show the report. Nothing is sent anywhere.
+  - Crash reports in `~/Library/Logs/OfficeCraft`: the panic, thread, backtrace and recent log lines. The next launch offers to show the report. Nothing is sent anywhere.
   - `packaging/macos/sign.sh`: hardened runtime with no exceptions, secure timestamp, and notarise and staple when given a profile. Without a Developer ID it signs ad hoc for this Mac.
   - Updates (craft-update) wait for a decision on where releases are published.
 - **8.4:** `scripts/licences.py` writes `docs/licences.md` from `cargo metadata`: 935 crates, all on the allowlist, 16 MPL-2.0 (symphonia, listed). `bundle.sh` runs it, failing the build on anything else, and copies the report and each Craft repo's attribution files into the app's Resources/Licenses.
-- **8.5:** `packaging/macos/dmg.sh` makes `build/Craftworks-<version>-<arch>.dmg`. The ad-hoc, hardened app inside it passes the full `--check`.
+- **8.5:** `packaging/macos/dmg.sh` makes `build/OfficeCraft-<version>-<arch>.dmg`. The ad-hoc, hardened app inside it passes the full `--check`.
 - **The `--check` run itself:**
   - It holds a user-initiated activity, so App Nap doesn't stall it in the background.
   - It stops waiting for a screenshot after 10 s, with a warning.
@@ -388,7 +388,7 @@ Done when: a signed, notarised `.dmg` installs and runs on a clean Mac of each a
   - Where releases are published (updates).
   - The clean-Mac tests.
   - The VoiceOver pass.
-  - ~~A licence for Craftworks itself~~: done, MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE), as the Craft apps.
+  - ~~A licence for OfficeCraft itself~~: done, MIT OR Apache-2.0 (LICENSE-MIT, LICENSE-APACHE), as the Craft apps.
 
 ---
 

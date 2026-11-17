@@ -1,4 +1,4 @@
-# Craftworks design: the shell's look and feel
+# OfficeCraft design: the shell's look and feel
 
 Status: proposed 2026-11-14, for Phase 2. Covers only **our** chrome: the tab strip, the new-tab and start pages, the sidebar, toasts and the review panel. Everything inside a tab is the Craft app, drawn as the app draws it.
 
@@ -75,7 +75,7 @@ The kind colours are the apps' own accents (WordCraft's blue, GridCraft's green,
 
 ## Controls
 
-Shared pieces in `craftworks_shell::widgets`, so a hover or a focus looks the same everywhere:
+Shared pieces in `officecraft_shell::widgets`, so a hover or a focus looks the same everywhere:
 
 - **Buttons:** 28 pt tall, 12 pt side padding, 12.5 pt semibold. *Primary* is filled with `accent` (one per panel: "Keep", "New Project…"); *secondary* is a `border` outline that fills with `surface-hover`.
 - **Icon buttons** ("+", the sidebar toggle): a square the tab's height, icon in `text-muted` turning `text` on hover over a `surface-hover` fill.
@@ -87,7 +87,7 @@ Shared pieces in `craftworks_shell::widgets`, so a hover or a focus looks the sa
 
 All our own, in two families:
 
-- **Things are Liquid Glass tiles.** A kind of file, a folder, a project, Home, the AI's sparkle and a toast's result are artwork drawn in code by `crates/craftworks-shell/assets/make_icons.py` and embedded as images (64 px for small sizes, 256 px for the New tiles). Each is a tinted glass tile lit from above (a sheen across its top, a bright rim fading down its sides, a shade along its foot, a soft shadow under it), with the glyph as a pane of frosted white glass floating over a fainter pane behind:
+- **Things are Liquid Glass tiles.** A kind of file, a folder, a project, Home, the AI's sparkle and a toast's result are artwork drawn in code by `crates/officecraft-shell/assets/make_icons.py` and embedded as images (64 px for small sizes, 256 px for the New tiles). Each is a tinted glass tile lit from above (a sheen across its top, a bright rim fading down its sides, a shade along its foot, a soft shadow under it), with the glyph as a pane of frosted white glass floating over a fainter pane behind:
   - Document: blue, a page with a turned corner and lines of text
   - Sheet: green, a table with a header row
   - Presentation: orange, a slide on a stand with a chart
@@ -122,7 +122,7 @@ All our own, in two families:
 ```
 ┌ ● ● ●  ▯ [▤] [▣ Q3 report ×] [▦ Budget] (+)                      ✦ AI · idle ┐
 ├───────────────┬──────────────────────────────────────────────────────────────┤
-│ ▤ Craftworks  │  Good afternoon                                              │
+│ ▤ OfficeCraft  │  Good afternoon                                              │
 │               │                                                              │
 │ ⌂ Home        │  NEW                                                         │
 │ ▢ Open…   ⌘O  │  [ page ]   [ grid ]   [ slide ]   [ PDF ]                   │
@@ -136,7 +136,7 @@ All our own, in two families:
 └───────────────┴──────────────────────────────────────────────────────────────┘
 ```
 
-- **Home is the new tab.** It is what Craftworks opens to, and what "+", ⌘T and the Home tab show: a page of the window in place of the document, never a panel over it (as Acrobat's Home and a browser's new tab are). Choosing a tab, anything on the page, or Esc puts it away; nothing is closed.
+- **Home is the new tab.** It is what OfficeCraft opens to, and what "+", ⌘T and the Home tab show: a page of the window in place of the document, never a panel over it (as Acrobat's Home and a browser's new tab are). Choosing a tab, anything on the page, or Esc puts it away; nothing is closed.
 - **It lays itself out to the window.** The column's margins and width grow with the window (up to 1160 pt); the New tiles share the width (four across, two in a narrow window, one in a very narrow one) and their icons grow with them; the search field takes a third of the row.
 - **The rail** (232 pt; dropped under 780 pt of width): the mark and name, then Home (marked with a bar of `accent`, as the office apps mark the current place), Open… (⌘O) and Open Project….
 - **New:** four tiles, each the kind's glass icon on a `sunken` desk. **New document, New workbook and New presentation open that app's own New page** (WordCraft's, GridCraft's and DeckCraft's File ▸ New: a blank file or any of its templates) in a new tab; picking a template there replaces the blank stand-in the page stands on. **Open a PDF** asks for the file. On hover the icon rises 3 pt and grows a touch, and the desk takes the kind's colour.

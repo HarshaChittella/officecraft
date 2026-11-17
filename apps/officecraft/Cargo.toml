@@ -1,0 +1,42 @@
+[package]
+name = "officecraft"
+description = "OfficeCraft: documents, sheets, presentations and PDFs in tabs of one window."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "officecraft"
+path = "src/main.rs"
+
+[dependencies]
+officecraft-core = { path = "../../crates/officecraft-core" }
+officecraft-render = { path = "../../crates/officecraft-render" }
+officecraft-shell = { path = "../../crates/officecraft-shell" }
+officecraft-platform = { path = "../../crates/officecraft-platform" }
+officecraft-mcp = { path = "../../crates/officecraft-mcp" }
+chrono.workspace = true
+eframe.workspace = true
+egui.workspace = true
+egui-wgpu.workspace = true
+wgpu.workspace = true
+image.workspace = true
+log.workspace = true
+serde_json.workspace = true
+pdfcraft-engine.workspace = true
+rfd.workspace = true
+# craft-libs (one revision for all, D16) and the Craft apps' macOS event wrapper.
+craft-menu = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0" }
+craft-keymap = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0", default-features = false }
+craft-quit = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0", features = ["egui"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+fmv-macos-events = "=0.1.0"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+
+[lints]
+workspace = true
