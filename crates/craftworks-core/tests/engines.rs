@@ -180,7 +180,6 @@ fn pdfs_open_switch_save_and_close() {
     let ctx = egui::Context::default();
     let mut ed = PdfEditor::new();
     frames(&ctx, &mut ed, 2);
-    assert!(ed.new_document().is_err(), "a PDF is opened, not made");
 
     // PdfCraft reads files on a worker: the tabs appear on later frames.
     let a = open_pdf(&ctx, &mut ed, &a_path);
@@ -204,6 +203,22 @@ fn pdfs_open_switch_save_and_close() {
     frames(&ctx, &mut ed, 2);
     assert_eq!(ed.close_state(a), CloseState::Closed);
     assert_eq!(ed.documents().len(), 1);
+}
+
+/// New PDF ("+" held down): PdfCraft's Create ▸ Blank Page, one empty page in a new tab that
+/// has no file yet.
+#[test]
+fn a_new_pdf_is_one_blank_unsaved_page() {
+    let ctx = egui::Context::default();
+    let mut ed = PdfEditor::new();
+    frames(&ctx, &mut ed, 2);
+    let doc = ed.new_document().expect("PdfCraft makes a blank PDF");
+    frames(&ctx, &mut ed, 2);
+    assert_eq!(ed.active(), Some(doc), "the new PDF is the one in front");
+    let docs = ed.documents();
+    assert_eq!(docs.len(), 1);
+    assert_eq!(docs[0].id, doc);
+    assert!(docs[0].path.is_none(), "it isn't saved anywhere until you save it");
 }
 
 /// One appearance across tabs: every engine draws dark or light as the window asks.
