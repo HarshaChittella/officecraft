@@ -104,6 +104,8 @@ pub struct App {
     pub ai: crate::ai::AiState,
     /// New Craft app releases, and rebuilding OfficeCraft from them (updates.rs).
     pub updates: crate::updates::Updates,
+    /// Ask AI, the chat panel at the right (chat/).
+    pub chat: crate::chat::ChatPanel,
     /// Open this bundle once the quit is done (a restart after an update).
     relaunch: Option<PathBuf>,
     /// The toast about last time's crash report, and the report.
@@ -180,6 +182,7 @@ impl App {
             projects: projects::Projects::default(),
             ai: crate::ai::AiState::default(),
             updates: crate::updates::Updates::new(),
+            chat: crate::chat::ChatPanel::default(),
             relaunch: None,
             catalogs: HashMap::new(),
             crash_toast: None,
@@ -1407,6 +1410,64 @@ impl App {
         }
     }
 
+    /// What Ask AI asked for.
+    fn on_chat_action(&mut self, ctx: &egui::Context, a: crate::chat::PanelAction) {
+        use crate::chat::PanelAction;
+        match a {
+            PanelAction::Send => {
+                let note = self.front_note();
+                self.chat.send(ctx, &note);
+            }
+            PanelAction::OpenProject => self.pending_open_project = true,
+            PanelAction::OpenSource { file, at } => {
+                let Some(root) = self.projects.current_item().map(|i| i.root) else { return };
+                // Only files inside the project open from a source.
+                let inside = root.join(&file).canonicalize().ok().filter(|p| root.canonicalize().is_ok_and(|r| p.starts_with(r)) && p.is_file());
+                let Some(path) = inside else {
+                    self.toasts.error(format!("{file} isn't in this project"));
+                    return;
+                };
+                self.newtab.open = false;
+                self.open(&path);
+                if let Some((location, query)) = at.as_deref().and_then(crate::chat::parse_where) {
+                    let hit = officecraft_core::index::Hit { path, location, snippet: String::new() };
+                    self.projects.goto = Some(projects::GoTo::new(&hit, &query));
+                }
+            }
+        }
+    }
+
+    /// The note Ask AI gets with each question: what's in front and what else is open.
+    pub fn front_note(&self) -> String {
+        let root = self.projects.current_item().map(|i| i.root);
+        let canon_root = root.as_ref().and_then(|r| r.canonicalize().ok());
+        let describe = |t: &TabItem| -> String {
+            let kind = t.kind.label().to_lowercase();
+            match &t.path {
+                Some(path) => {
+                    let canon = path.canonicalize().unwrap_or_else(|_| path.clone());
+                    match canon_root.as_ref().and_then(|r| canon.strip_prefix(r).ok()) {
+                        Some(rel) => format!("the {kind} \"{}\" in the project", rel.to_string_lossy()),
+                        None => format!("the {kind} {} (not in this project, so the tools can't read it)", file_name(path)),
+                    }
+                }
+                None => format!("\"{}\", a new {kind} that isn't saved yet", t.label),
+            }
+        };
+        let items = self.tab_items();
+        let front = (!self.newtab.open).then(|| self.tabs.active().map(|t| t.id.0)).flatten().and_then(|id| items.iter().find(|t| t.id == id));
+        let mut note = String::from("Note from OfficeCraft: ");
+        match front {
+            Some(t) => note += &format!("in front is {}.", describe(t)),
+            None => note += "Home is in front; no document is.",
+        }
+        let others: Vec<String> = items.iter().filter(|t| front.is_none_or(|f| f.id != t.id) && !t.busy).take(8).map(describe).collect();
+        if !others.is_empty() {
+            note += &format!(" Also open: {}.", others.join("; "));
+        }
+        note
+    }
+
     fn on_newtab_action(&mut self, a: NewTabAction) {
         match a {
             NewTabAction::New(kind) => self.new_document(kind),
@@ -1545,7 +1606,7 @@ impl App {
     /// filter field has focus. With tabs open and no popover the chrome has no text field, so
     /// the keyboard is the document's (a stale focus left by a closed popover doesn't count).
     fn chrome_has_keyboard(&self, ctx: &egui::Context) -> bool {
-        self.newtab.open || self.sidebar.wants_keyboard(ctx) || (self.tabs.is_empty() && ctx.egui_wants_keyboard_input())
+        self.newtab.open || self.sidebar.wants_keyboard(ctx) || self.chat.wants_keyboard(ctx) || (self.tabs.is_empty() && ctx.egui_wants_keyboard_input())
     }
 
     fn shortcuts(&mut self) {
@@ -1678,6 +1739,9 @@ impl eframe::App for App {
             self.updates.check_if_due(&ctx);
         }
         self.updates.tick();
+        let project_root = self.projects.current_item().map(|i| i.root);
+        self.chat.set_project(project_root);
+        self.chat.poll();
         for (error, text) in std::mem::take(&mut self.updates.notices) {
             if error {
                 self.toasts.error(text);
@@ -1733,6 +1797,17 @@ impl eframe::App for App {
                     self.updates.popover_open = !self.updates.popover_open;
                 }
                 self.updates.pill_rect = Some(pr);
+                right = pr.left() - 8.0;
+            }
+            // Ask AI: opens the chat panel at the right.
+            {
+                let label = "Ask AI";
+                let w = officecraft_shell::widgets::pill_width(ui, label);
+                let pr = Rect::from_min_size(pos2(right - w, r.center().y - 12.0), egui::vec2(w, 24.0));
+                let resp = officecraft_shell::widgets::status_pill(ui, &p, pr, egui::Id::unique("cw_ask_ai_pill"), label, self.chat.open, self.chat.busy(), officecraft_shell::icons::chat);
+                if resp.on_hover_text("Ask about this project's files").clicked() {
+                    self.chat.toggle();
+                }
                 right = pr.left() - 8.0;
             }
             // The AI's pill: "Connect AI" until an AI has been in touch, then what it's doing.
@@ -1815,6 +1890,26 @@ impl eframe::App for App {
             // Only an open sidebar acts: what it draws while sliding shut is for show.
             for a in acts.into_iter().filter(|_| open) {
                 self.on_sidebar_action(&ctx, a);
+            }
+        }
+
+        // Ask AI, at the right; it slides in and out like the sidebar.
+        {
+            let name = self.projects.current_item().map(|i| i.name);
+            let chat = &mut self.chat;
+            let open = chat.open;
+            let mut expanded = open;
+            let acts = egui::Panel::right("cw_chat")
+                .resizable(true)
+                .default_size(380.0)
+                .size_range(300.0..=640.0)
+                .show_separator_line(false)
+                .frame(egui::Frame::NONE.fill(p.surface))
+                .show_collapsible(ui, &mut expanded, |ui| chat.view(ui, &p, name.as_deref()))
+                .map(|r| r.inner)
+                .unwrap_or_default();
+            for a in acts.into_iter().filter(|_| open) {
+                self.on_chat_action(&ctx, a);
             }
         }
 

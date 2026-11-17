@@ -31,12 +31,16 @@ rfd.workspace = true
 craft-menu = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0" }
 craft-keymap = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0", default-features = false }
 craft-quit = { git = "https://github.com/storytold/craft-libs", rev = "e2dc681a3", version = "0.1.0", features = ["egui"] }
+# Ask AI (docs/ai-chat.md): HTTPS to Claude's API, with the same features craft-update builds it with.
+ureq = { version = "3.4", default-features = false, features = ["rustls-no-provider", "_ring", "gzip", "platform-verifier"] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 fmv-macos-events = "=0.1.0"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSWindow", "NSButton", "NSControl", "NSView", "NSResponder"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSGeometry"] }
+# The Ask AI key, in the Keychain (already in the build through the TLS platform verifier).
+security-framework = "3"
 
 [lints]
 workspace = true

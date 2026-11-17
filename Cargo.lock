@@ -4984,7 +4984,9 @@ dependencies = [
  "officecraft-shell",
  "pdfcraft-engine",
  "rfd",
+ "security-framework",
  "serde_json",
+ "ureq",
  "wgpu",
 ]
 

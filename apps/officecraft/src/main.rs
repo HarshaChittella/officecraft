@@ -19,6 +19,7 @@
 
 mod ai;
 mod app;
+mod chat;
 mod check;
 mod connect;
 mod crash;

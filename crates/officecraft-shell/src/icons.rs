@@ -207,6 +207,22 @@ pub fn update(p: &Painter, r: Rect, color: Color32) {
     line(p, r, &[(2.75, 10.5), (2.75, 13.25), (13.25, 13.25), (13.25, 10.5)], color);
 }
 
+/// A chat: a speech bubble with its tail at the lower left.
+pub fn chat(p: &Painter, r: Rect, color: Color32) {
+    line(p, r, &[(3.5, 3.0), (12.5, 3.0), (14.0, 4.5), (14.0, 9.5), (12.5, 11.0), (7.0, 11.0), (4.0, 13.75), (4.0, 11.0), (3.5, 11.0), (2.0, 9.5), (2.0, 4.5), (3.5, 3.0)], color);
+}
+
+/// Send: an arrow pointing up.
+pub fn send(p: &Painter, r: Rect, color: Color32) {
+    line(p, r, &[(8.0, 13.0), (8.0, 3.5)], color);
+    line(p, r, &[(4.0, 7.5), (8.0, 3.5), (12.0, 7.5)], color);
+}
+
+/// Stop: a rounded square.
+pub fn stop(p: &Painter, r: Rect, color: Color32) {
+    p.rect_filled(Rect::from_min_max(at(r, 4.5, 4.5), at(r, 11.5, 11.5)), CornerRadius::same(corner(r, 1.5)), color);
+}
+
 /// A busy ring: a faint track with a bright arc going round. `time` is in seconds.
 pub fn spinner(p: &Painter, r: Rect, time: f64, color: Color32) {
     ring(p, r, (8.0, 8.0), 5.25, STROKE, Palette::tint(color, 0.22));
@@ -249,6 +265,9 @@ mod tests {
                 sparkle(&p, r, Color32::GRAY);
                 sidebar(&p, r, true, Color32::GRAY);
                 spinner(&p, r, 1.3, Color32::GRAY);
+                chat(&p, r, Color32::GRAY);
+                send(&p, r, Color32::GRAY);
+                stop(&p, r, Color32::GRAY);
             }
         });
         out.textures_delta.clear();

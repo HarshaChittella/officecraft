@@ -65,6 +65,10 @@ enum Stage {
     ConnectAi {
         step: u8,
     },
+    /// The Ask AI panel with a made-up conversation (nothing is sent or saved).
+    AskAi {
+        step: u8,
+    },
     Report,
     Done,
 }
@@ -1528,12 +1532,45 @@ impl Check {
                     }
                     _ => {
                         app.ai.connect_open = false;
-                        self.stage = Stage::Quit { phase: 0 };
+                        self.stage = Stage::AskAi { step: 0 };
                         self.wait = 5;
                         return;
                     }
                 }
                 self.stage = Stage::ConnectAi { step: step + 1 };
+            }
+            Stage::AskAi { step } => {
+                match step {
+                    0 => {
+                        let root = app.projects.current_item().map(|i| i.root).unwrap_or_else(|| self.dir.clone());
+                        let mut chat = crate::chat::store::Chat::new(0);
+                        chat.messages = vec![
+                            serde_json::json!({"role": "user", "content": [{"type": "text", "text": "How did revenue change this quarter?"}]}),
+                            serde_json::json!({"role": "system", "content": "Note from OfficeCraft: in front is the sheet \"Budget.xlsx\" in the project."}),
+                            serde_json::json!({"role": "assistant", "content": [
+                                {"type": "tool_use", "id": "t1", "name": "project_search", "input": {"query": "revenue"}},
+                            ]}),
+                            serde_json::json!({"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t1", "content": "…"}]}),
+                            serde_json::json!({"role": "assistant", "content": [
+                                {"type": "text", "text": "Revenue **grew in every region**: the North rose to 1,200 [[Budget.xlsx|Sheet1!B2]] and the South to 1,350 [[Budget.xlsx|Sheet1!B3]].\n\n- The report puts it down to new customers [[Q3 report.docx|\"grew in every region\"]]\n- The deck repeats the figures [[Pitch deck.pptx|Slide 2]]"},
+                            ]}),
+                        ];
+                        app.chat.show_preview(chat, root);
+                        self.wait = 90;
+                    }
+                    1 => {
+                        self.check(app.chat.open, "Ask AI shows a conversation with its sources as chips");
+                        self.screenshot(ctx, "ask-ai");
+                        self.wait = 90;
+                    }
+                    _ => {
+                        app.chat.end_preview();
+                        self.stage = Stage::Quit { phase: 0 };
+                        self.wait = 5;
+                        return;
+                    }
+                }
+                self.stage = Stage::AskAi { step: step + 1 };
             }
             Stage::Report => {
                 let warnings = logger::warnings();

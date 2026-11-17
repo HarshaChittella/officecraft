@@ -1,0 +1,370 @@
+//! One turn of Ask AI (docs/ai-chat.md): send the conversation, run the tools Claude asks for,
+//! send their results, until Claude has answered. The tools are the AI connector's own
+//! (`officecraft_mcp::Server`), run in-process with the same project-folder jail; this stage
+//! offers only the ones that read.
+
+use super::api::{self, ApiError, Credential, Event, Reply};
+use officecraft_mcp::Server;
+use serde_json::{Value, json};
+use std::path::Path;
+use std::sync::atomic::AtomicBool;
+
+/// The model, and how hard it thinks (Claude Opus 5.5 defaults to `medium`; said explicitly).
+pub const MODEL: &str = "claude-opus-5-5";
+pub const EFFORT: &str = "medium";
+/// Room for a long answer; the request streams, so a large cap is safe.
+const MAX_TOKENS: u32 = 64_000;
+/// Rounds of tool calls in one turn before it stops.
+const MAX_ROUNDS: usize = 16;
+
+/// The tools this stage offers: they read, search and show; none changes a file.
+pub const READ_TOOLS: [&str; 5] = ["project_active", "project_files", "project_search", "project_read", "project_open"];
+
+/// The fixed instructions (cached with the tool list; what changes goes in later messages).
+pub const SYSTEM: &str = "You are the assistant built into OfficeCraft, where people work on documents, spreadsheets, presentations and PDFs in tabs of one window. You help with the files of the project that's open: a folder of those files.
+
+Look at the files with the tools before answering questions about them; don't guess at what they say. project_search finds text across every file and says where each match is; project_read reads a file; project_files lists them; project_active says which file the person has in front of them; project_open shows a file to them in a tab. Each time the person writes, a note from OfficeCraft says what's in front of them: use it when they say \"this\", \"here\" or \"the current one\".
+
+You can read and search, but you can't change files yet. If asked to edit or create something, say that changing files from this chat is coming soon, and give the text or the steps they can use for now.
+
+Cite what you take from a file right after the statement, as [[file|where]]: file is the path the tools gave, and where is the tool's \"where\" value, such as Sheet1!B4, Slide 3 or Page 2. For a passage of a document, put a few of its words in quotes as where: [[Q3 report.docx|\"revenue grew in every region\"]]. Use [[file]] for a file as a whole.
+
+Write for a chat panel about 360 points wide: lead with the answer, keep paragraphs short, use simple \"- \" lists and **bold** sparingly, and no tables or headings.";
+
+/// Sends a request and reads the streamed reply (the API, or a stand-in in tests).
+pub trait Transport {
+    fn send(&mut self, body: &Value, cancel: &AtomicBool, on: &mut dyn FnMut(Event)) -> Result<Reply, ApiError>;
+}
+
+/// The API itself.
+pub struct Api(pub Credential);
+
+impl Transport for Api {
+    fn send(&mut self, body: &Value, cancel: &AtomicBool, on: &mut dyn FnMut(Event)) -> Result<Reply, ApiError> {
+        api::send(&self.0, body, cancel, on)
+    }
+}
+
+/// What the panel hears during a turn.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Update {
+    /// More text of the answer being written.
+    Text(String),
+    /// A tool is running: what it's doing, in words.
+    Step(String),
+    /// The conversation so far, to show and save.
+    Saved(Vec<Value>),
+    /// The turn ended; `None` when it went well, else what went wrong.
+    Done(Option<String>),
+}
+
+/// The tools, run in-process.
+pub struct Tools {
+    server: Server,
+    defs: Vec<Value>,
+}
+
+impl Tools {
+    /// The project's tools. `settings` is where the window's live link is (so `project_active`
+    /// and `project_open` reach this window).
+    pub fn new(root: &Path, settings: Option<&Path>) -> Result<Tools, String> {
+        let mut server = Server::new(root, false)?;
+        if let Some(dir) = settings {
+            server = server.with_settings_dir(dir);
+        }
+        let listed = server.handle(&json!({"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}})).unwrap_or_default();
+        let defs = listed["result"]["tools"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|t| t["name"].as_str().is_some_and(|n| READ_TOOLS.contains(&n)))
+            .map(|t| {
+                json!({
+                    "name": t["name"],
+                    "description": t["description"],
+                    "input_schema": t["inputSchema"],
+                    // Streamed as generated; checked here before anything runs.
+                    "eager_input_streaming": true,
+                })
+            })
+            .collect();
+        Ok(Tools { server, defs })
+    }
+
+    pub fn defs(&self) -> &[Value] {
+        &self.defs
+    }
+
+    /// Runs `name` with `input`: the result's text, and whether it failed.
+    pub fn run(&mut self, name: &str, input: &Value) -> (String, bool) {
+        let Some(def) = self.defs.iter().find(|d| d["name"] == name) else {
+            return (format!("{name} isn't available in this chat."), true);
+        };
+        if let Err(e) = check_input(&def["input_schema"], input) {
+            return (e, true);
+        }
+        let r = self.server.call(name, input);
+        let text: Vec<&str> = r["content"].as_array().into_iter().flatten().filter_map(|c| c["text"].as_str()).collect();
+        (text.join("\n"), r["isError"] == json!(true))
+    }
+}
+
+/// Checks a tool's input against the parts of its schema that matter here: an object, the
+/// required fields present, and each field of the declared simple type.
+pub fn check_input(schema: &Value, input: &Value) -> Result<(), String> {
+    let Some(obj) = input.as_object() else { return Err("The tool's input must be an object.".into()) };
+    for req in schema["required"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+        if !obj.contains_key(req) {
+            return Err(format!("Missing \"{req}\"."));
+        }
+    }
+    for (k, v) in obj {
+        let ok = match schema["properties"][k]["type"].as_str() {
+            Some("string") => v.is_string(),
+            Some("integer") => v.is_i64() || v.is_u64(),
+            Some("number") => v.is_number(),
+            Some("boolean") => v.is_boolean(),
+            Some("object") => v.is_object(),
+            Some("array") => v.is_array(),
+            _ => true,
+        };
+        if !ok {
+            return Err(format!("\"{k}\" has the wrong type."));
+        }
+    }
+    Ok(())
+}
+
+/// What a tool call is doing, for the panel ("Searched “budget”").
+pub fn step_label(name: &str, input: &Value) -> String {
+    let s = |k: &str| input[k].as_str().unwrap_or_default().to_string();
+    match name {
+        "project_search" => format!("Searched “{}”", s("query")),
+        "project_read" => format!("Read {}", s("file")),
+        "project_files" => "Listed the project's files".into(),
+        "project_active" => "Looked at what's in front".into(),
+        "project_open" => format!("Opened {}", s("file")),
+        other => format!("Used {other}"),
+    }
+}
+
+/// The request for `messages`.
+pub fn request(tools: &[Value], messages: &[Value]) -> Value {
+    json!({
+        "model": MODEL,
+        "max_tokens": MAX_TOKENS,
+        "stream": true,
+        "thinking": {"type": "adaptive"},
+        "output_config": {"effort": EFFORT},
+        // Declined requests are retried on another model, server-side.
+        "fallbacks": "default",
+        // The tool list and instructions don't change: cached, and the conversation after them.
+        "cache_control": {"type": "ephemeral"},
+        "system": [{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}],
+        "tools": tools,
+        "messages": messages,
+    })
+}
+
+/// Runs one turn: `messages` ends with the person's message (and the note about what's in
+/// front). Appends the replies and tool results to `messages` as it goes.
+pub fn run(messages: &mut Vec<Value>, tools: &mut Tools, transport: &mut dyn Transport, cancel: &AtomicBool, emit: &mut dyn FnMut(Update)) {
+    for _ in 0..MAX_ROUNDS {
+        let body = request(tools.defs(), messages);
+        let mut on = |e: Event| match e {
+            Event::Text(_, t) => emit(Update::Text(t)),
+            Event::ToolCall(..) => {}
+        };
+        let reply = match transport.send(&body, cancel, &mut on) {
+            Ok(r) => r,
+            Err(e) => {
+                emit(Update::Done(Some(e.message())));
+                return;
+            }
+        };
+        messages.push(json!({"role": "assistant", "content": api::echo_content(&reply.content)}));
+        emit(Update::Saved(messages.clone()));
+        let calls: Vec<(usize, Value)> =
+            reply.content.iter().enumerate().filter(|(_, b)| b["type"] == "tool_use").map(|(i, b)| (i, b.clone())).collect();
+        match reply.stop_reason.as_str() {
+            "refusal" => {
+                answer_unrun(messages, &calls, "Not run: the request was declined.");
+                emit(Update::Saved(messages.clone()));
+                emit(Update::Done(Some("Claude declined this request.".into())));
+                return;
+            }
+            "max_tokens" if !calls.is_empty() => {
+                answer_unrun(messages, &calls, "Not run: the reply was cut off.");
+                emit(Update::Saved(messages.clone()));
+                emit(Update::Done(Some("The answer ran too long and was cut off.".into())));
+                return;
+            }
+            "tool_use" if !calls.is_empty() => {
+                let mut results = Vec::new();
+                for (i, call) in &calls {
+                    let name = call["name"].as_str().unwrap_or_default();
+                    let id = call["id"].clone();
+                    if let Some((_, raw)) = reply.invalid_inputs.iter().find(|(j, _)| j == i) {
+                        results.push(json!({"type": "tool_result", "tool_use_id": id, "is_error": true, "content": json!({"INVALID_JSON": raw}).to_string()}));
+                        continue;
+                    }
+                    emit(Update::Step(step_label(name, &call["input"])));
+                    let (text, failed) = tools.run(name, &call["input"]);
+                    let mut r = json!({"type": "tool_result", "tool_use_id": id, "content": text});
+                    if failed {
+                        r["is_error"] = json!(true);
+                    }
+                    results.push(r);
+                }
+                messages.push(json!({"role": "user", "content": results}));
+                emit(Update::Saved(messages.clone()));
+            }
+            _ => {
+                emit(Update::Done(None));
+                return;
+            }
+        }
+    }
+    emit(Update::Done(Some(format!("Stopped after {MAX_ROUNDS} rounds of looking things up."))))
+}
+
+/// Tool calls that won't run still get an answer, so the conversation stays valid.
+fn answer_unrun(messages: &mut Vec<Value>, calls: &[(usize, Value)], why: &str) {
+    if calls.is_empty() {
+        return;
+    }
+    let results: Vec<Value> = calls.iter().map(|(_, c)| json!({"type": "tool_result", "tool_use_id": c["id"], "is_error": true, "content": why})).collect();
+    messages.push(json!({"role": "user", "content": results}));
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    /// A stand-in for the API: hands out the scripted replies in turn and keeps the requests.
+    struct Script {
+        replies: Vec<Reply>,
+        sent: Vec<Value>,
+    }
+
+    impl Transport for Script {
+        fn send(&mut self, body: &Value, _: &AtomicBool, on: &mut dyn FnMut(Event)) -> Result<Reply, ApiError> {
+            self.sent.push(body.clone());
+            if self.replies.is_empty() {
+                return Err(ApiError::Status(500, "no more".into()));
+            }
+            let r = self.replies.remove(0);
+            for (i, b) in r.content.iter().enumerate() {
+                if b["type"] == "text" {
+                    on(Event::Text(i, b["text"].as_str().unwrap().into()));
+                }
+            }
+            Ok(r)
+        }
+    }
+
+    fn reply(stop: &str, content: Vec<Value>) -> Reply {
+        Reply { content, stop_reason: stop.into(), model: MODEL.into(), usage: json!({}), invalid_inputs: vec![] }
+    }
+
+    fn project(name: &str) -> std::path::PathBuf {
+        let root = std::env::temp_dir().join(format!("oc-chat-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let bytes = pdfcraft_engine::Session::new().create_from_text("t", "Quarterly revenue grew in every region").unwrap();
+        std::fs::write(root.join("report.pdf"), bytes.as_slice()).unwrap();
+        root
+    }
+
+    #[test]
+    fn a_turn_reads_the_project_then_answers() {
+        let root = project("reads");
+        let mut tools = Tools::new(&root, Some(&root.join(".no-window"))).unwrap();
+        let names: Vec<&str> = tools.defs().iter().filter_map(|d| d["name"].as_str()).collect();
+        assert_eq!(names.len(), READ_TOOLS.len(), "only the reading tools: {names:?}");
+        assert!(tools.defs().iter().all(|d| d["eager_input_streaming"] == true && d["input_schema"]["type"] == "object"));
+
+        let mut script = Script {
+            replies: vec![
+                reply("tool_use", vec![
+                    json!({"type": "thinking", "thinking": "", "signature": "s"}),
+                    json!({"type": "tool_use", "id": "t1", "name": "project_read", "input": {"file": "report.pdf"}}),
+                ]),
+                reply("end_turn", vec![json!({"type": "text", "text": "It grew. [[report.pdf|Page 1]]"})]),
+            ],
+            sent: vec![],
+        };
+        let mut messages = vec![json!({"role": "user", "content": [{"type": "text", "text": "What happened to revenue?"}]})];
+        let mut updates = Vec::new();
+        run(&mut messages, &mut tools, &mut script, &AtomicBool::new(false), &mut |u| updates.push(u));
+
+        assert_eq!(updates.last(), Some(&Update::Done(None)));
+        assert!(updates.contains(&Update::Step("Read report.pdf".into())));
+        assert_eq!(messages.len(), 4, "question, tool call, result, answer");
+        assert_eq!(messages[1]["content"][0]["signature"], "s", "thinking goes back unchanged");
+        let result = &messages[2]["content"][0];
+        assert_eq!(result["tool_use_id"], "t1");
+        assert!(result["content"].as_str().unwrap().contains("Quarterly revenue"), "{result}");
+        assert!(result.get("is_error").is_none());
+        // The second request carried the tool result; both carry the same fixed prefix.
+        assert_eq!(script.sent.len(), 2);
+        assert_eq!(script.sent[0]["system"], script.sent[1]["system"]);
+        assert_eq!(script.sent[0]["tools"], script.sent[1]["tools"]);
+        assert_eq!(script.sent[1]["messages"].as_array().unwrap().len(), 3);
+        assert_eq!(script.sent[0]["fallbacks"], "default");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_tool_it_doesnt_have_or_bad_input_is_answered_with_an_error() {
+        let root = project("bad-input");
+        let mut tools = Tools::new(&root, Some(&root.join(".no-window"))).unwrap();
+        let (text, failed) = tools.run("doc.execute", &json!({}));
+        assert!(failed && text.contains("isn't available"));
+        let (_, failed) = tools.run("project_read", &json!({"file": 3}));
+        assert!(failed);
+        let (_, failed) = tools.run("project_read", &json!({}));
+        assert!(failed);
+
+        let mut bad = reply("tool_use", vec![json!({"type": "tool_use", "id": "t1", "name": "project_search", "input": {}})]);
+        bad.invalid_inputs = vec![(0, "{\"query\": \"a".into())];
+        let mut script = Script { replies: vec![bad, reply("end_turn", vec![json!({"type": "text", "text": "Sorry."})])], sent: vec![] };
+        let mut messages = vec![json!({"role": "user", "content": "find a"})];
+        run(&mut messages, &mut tools, &mut script, &AtomicBool::new(false), &mut |_| {});
+        let r = &messages[2]["content"][0];
+        assert_eq!(r["is_error"], true);
+        assert!(r["content"].as_str().unwrap().contains("INVALID_JSON"));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn a_refusal_or_an_error_ends_the_turn_and_leaves_a_valid_conversation() {
+        let root = project("refusal");
+        let mut tools = Tools::new(&root, Some(&root.join(".no-window"))).unwrap();
+        let mut script = Script {
+            replies: vec![reply("refusal", vec![json!({"type": "tool_use", "id": "t1", "name": "project_files", "input": {}})])],
+            sent: vec![],
+        };
+        let mut messages = vec![json!({"role": "user", "content": "x"})];
+        let mut last = None;
+        run(&mut messages, &mut tools, &mut script, &AtomicBool::new(false), &mut |u| last = Some(u));
+        assert_eq!(last, Some(Update::Done(Some("Claude declined this request.".into()))));
+        assert_eq!(messages.last().unwrap()["content"][0]["tool_use_id"], "t1", "the unrun call is answered");
+        // The API failing: a message, nothing added.
+        let mut messages = vec![json!({"role": "user", "content": "x"})];
+        run(&mut messages, &mut tools, &mut script, &AtomicBool::new(false), &mut |u| last = Some(u));
+        assert!(matches!(last, Some(Update::Done(Some(_)))));
+        assert_eq!(messages.len(), 1);
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn step_labels_and_input_checks() {
+        assert_eq!(step_label("project_search", &json!({"query": "budget"})), "Searched “budget”");
+        let schema = json!({"type": "object", "properties": {"limit": {"type": "integer"}}, "required": ["query"]});
+        assert!(check_input(&schema, &json!({"query": "a", "limit": 3})).is_ok());
+        assert!(check_input(&schema, &json!({"query": "a", "limit": "3"})).is_err());
+        assert!(check_input(&schema, &json!([])).is_err());
+    }
+}
