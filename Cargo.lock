@@ -4962,7 +4962,7 @@ dependencies = [
 
 [[package]]
 name = "officecraft"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "craft-keymap",
@@ -4992,7 +4992,7 @@ dependencies = [
 
 [[package]]
 name = "officecraft-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "craft-keymap",
  "craft-menu",
@@ -5017,7 +5017,7 @@ dependencies = [
 
 [[package]]
 name = "officecraft-mcp"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "deckcraft-mcp",
  "egui",
@@ -5033,7 +5033,7 @@ dependencies = [
 
 [[package]]
 name = "officecraft-platform"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "arboard",
  "craft-print",
@@ -5055,7 +5055,7 @@ dependencies = [
 
 [[package]]
 name = "officecraft-render"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "egui",
  "egui-wgpu",
@@ -5067,7 +5067,7 @@ dependencies = [
 
 [[package]]
 name = "officecraft-shell"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "egui",
